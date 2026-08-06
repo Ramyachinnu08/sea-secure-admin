@@ -26,8 +26,6 @@ const PARTICLES = Array.from({ length: 28 }, (_, i) => ({
 
 export default function App() {
   const getInitialScreen = () => {
-    const hash = window.location.hash;
-    if(hash && hash.includes("type=recovery")) return "newpassword";
     const urlParams = new URLSearchParams(window.location.search);
     const resetToken = urlParams.get('token');
     if(resetToken) return "newpassword";
@@ -277,28 +275,9 @@ export default function App() {
   const [settingsDefaultProfiles, setSettingsDefaultProfiles] = useState({randomness:"None", scoring:"None", ai:"None", report:"None"});
   const [settingsNotifications, setSettingsNotifications] = useState({emailSubmission:false, emailReady:false, emailOverdue:false, slack:false});
 
-  const API = "https://sea-secure-backend-production.up.railway.app";
-const SUPABASE_URL = "https://opkvnopwrbsplsmjwwbo.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wa3Zub3B3cmJzcGxzbWp3d2JvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxNTMxMDMsImV4cCI6MjA4OTcyOTEwM30._gNXIWYySCX8k8Rb_brEaAM_J84A3Zk6tojB1i1lyT8";
-
-const sbFetch = async (path, options = {}) => {
-  const res = await fetch(`${SUPABASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": "return=representation",
-      ...(options.headers || {}),
-    },
-  });
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : [];
-  if (!res.ok) throw new Error(JSON.stringify(data));
-  return data;
-};
-  const getToken = () => localStorage.getItem("token");
-  const authHeader = () => ({ "Content-Type":"application/json", "Authorization":`Bearer ${getToken()}` });
+  const API = "";
+  const getToken = () => "";
+  const authHeader = () => ({ "Content-Type":"application/json" });
 
   useEffect(()=>{
     const urlParams = new URLSearchParams(window.location.search);
@@ -307,14 +286,12 @@ const sbFetch = async (path, options = {}) => {
     const authToken = localStorage.getItem("token");
     if(!authToken){ setScreen("signin"); return; }
     setScreen("app");
-    // Load all data from Supabase
-    sbFetch(`/rest/v1/fleets?select=*`).then(d=>setFleets(d||[]));
-    sbFetch(`/rest/v1/vessels?select=*,fleets(*)`).then(d=>setVessels(d||[]));
-    sbFetch(`/rest/v1/questions?select=*`).then(d=>setQuestions((d||[]).map(q=>({...q,text:q.question,subNumber:q.sub_number,subArea:q.sub_area,inspectionGuide:q.guide_to_inspection,evidenceRequired:q.evidence_required}))));
-    sbFetch(`/rest/v1/templates?select=*,template_versions(*)`).then(d=>setTemplates(d||[]));
-    sbFetch(`/rest/v1/assignments?select=*,vessels(*),template_versions(*,templates(*))`).then(d=>setAssignments(d||[]));
-    sbFetch(`/rest/v1/users?role=eq.inspector&select=*`).then(d=>setInspectors(d||[]));
-    sbFetch(`/rest/v1/users?select=*`).then(d=>setAdmins((d||[]).filter(u=>u.role==='admin'||u.role==='super_admin')));
+    // Dummy data
+    setFleets([{id:"1",name:"BlueWave Fleet",description:"Main fleet",vessels:[]},{id:"2",name:"Pacific Fleet",description:"Pacific operations",vessels:[]}]);
+    setVessels([{id:"1",name:"MT Blue Horizon",imo:"IMO9456723",type:"Tanker",flag:"Panama",operator:"Sea Secure Shipping",build_year:2015,status:"active",fleet:"BlueWave Fleet"},{id:"2",name:"MV Pacific Star",imo:"IMO9123456",type:"Bulk Carrier",flag:"Singapore",operator:"Sea Secure Shipping",build_year:2018,status:"active",fleet:"Pacific Fleet"}]);
+    setQuestions([{id:"1",text:"Is the fire extinguisher in good condition?",subNumber:"1.1.1",category:"Fire Safety",severity:"Critical",type:"Yes/No",evidenceRequired:true,inspectionGuide:"Check pressure gauge and expiry date"},{id:"2",text:"Are lifejackets properly stored?",subNumber:"1.1.2",category:"Safety Equipment",severity:"Major",type:"Yes/No",evidenceRequired:false,inspectionGuide:"Check storage location"}]);
+    setInspectors([{id:"1",name:"John Inspector",email:"john@seasecure.com",role:"inspector",status:"active"},{id:"2",name:"Sara Marine",email:"sara@seasecure.com",role:"inspector",status:"active"}]);
+    setAdmins([{id:"1",name:"Ramya Poojary",email:"ramyapoojary871@gmail.com",role:"admin",status:"active"}]);
   }, []);
 
   const PALETTES = {
@@ -346,7 +323,7 @@ const sbFetch = async (path, options = {}) => {
   });
 
   const addVessel = async () => {
-    if (!newVessel.name) return;signin
+    if (!newVessel.name) return;
     try{
       const fleet = fleets.find(f=>f.name===newVessel.fleet);
       const r = await fetch(`${API}/api/admin/vessels`,{method:"POST",headers:authHeader(),body:JSON.stringify({name:newVessel.name,imo:newVessel.imo,type:newVessel.type,flag:newVessel.flag,operator:newVessel.operator,build_year:newVessel.buildYear?parseInt(newVessel.buildYear):null,fleet_id:fleet?fleet.id:null})});
@@ -491,27 +468,13 @@ const sbFetch = async (path, options = {}) => {
           onClick={async()=>{
             if(!loginEmail||!loginPassword){setLoginError("Email and password required");return;}
             setLoginLoading(true);setLoginError("");
-            try{
-              const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-                method: "POST",
-                headers: {
-                  "apikey": SUPABASE_KEY,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ email: loginEmail, password: loginPassword }),
-              });
-              const d = await res.json();
-              if(res.ok && d.access_token){
-                localStorage.setItem("token", d.access_token);
-                const dbUsers = await sbFetch(`/rest/v1/users?email=ilike.${encodeURIComponent(loginEmail)}&select=*`);
-                const dbUser = dbUsers[0] || {};
-                localStorage.setItem("user", JSON.stringify({ id: d.user.id, email: d.user.email, name: dbUser.name || loginEmail, role: dbUser.role || "admin" }));
-                setScreen("app");
-              } else {
-                setLoginError(d.message || "Login failed");
-              }
-            }catch(e){setLoginError("Cannot connect to server. Make sure backend is running.");}
-            setLoginLoading(false);
+            // Dummy login - accept any email/password
+            setTimeout(()=>{
+              localStorage.setItem("token","dummy-token");
+              localStorage.setItem("user",JSON.stringify({id:"1",name:"Ramya Poojary",email:loginEmail,role:"admin"}));
+              setScreen("app");
+              setLoginLoading(false);
+            },800);
           }}
           style={{ width:"100%", padding:"14px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:16, fontWeight:700, cursor:"pointer", marginTop:20, marginBottom:14, fontFamily:"inherit", opacity:loginLoading?0.7:1 }}
         >{loginLoading?"Signing in...":"Sign In"}</button>
@@ -537,57 +500,11 @@ const sbFetch = async (path, options = {}) => {
         <button onClick={async()=>{
           if(!email) return;
           try{
-            await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
-              method: "POST",
-              headers: {
-                "apikey": SUPABASE_KEY,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ 
-  email,
-  redirectTo: "http://localhost:5174"
-}),
-            });
-            setScreen("resetSent");
+            const r=await fetch(`${API}/api/auth/forgot-password`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+            const d=await r.json();
+            if(d.success){ setScreen("resetSent"); }
           }catch(e){ alert("Cannot connect to server"); }
         }} style={{ width:"100%", padding:"14px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:14, fontFamily:"inherit" }}>Send Reset Link</button>
-        <div style={{ textAlign:"center" }}><span onClick={()=>setScreen("signin")} style={{ color:A, fontSize:14, fontWeight:600, cursor:"pointer" }}>Back to Sign In</span></div>
-      </Card>
-    </BG>
-  );
-if (screen==="newpassword") return (
-    <BG><Logo title="Reset Password" sub="Admin Portal"/>
-      <Card maxWidth={460}>
-        <h2 style={{ fontSize:20, fontWeight:800, color:"#111", marginBottom:4 }}>Set new password</h2>
-        <p style={{ fontSize:14, color:"#6b7280", marginBottom:24 }}>Enter your new password below.</p>
-        <div style={{ marginBottom:16 }}>
-          <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>New Password</label>
-          <div style={{ display:"flex", alignItems:"center", border:"1.5px solid #e5e7eb", borderRadius:8, padding:"11px 14px", gap:10 }}>
-            <span style={{ color:"#9ca3af" }}>🔒</span>
-            <input value={newPassword} onChange={e=>setNewPassword(e.target.value)} type={showNewPassword?"text":"password"} placeholder="Enter new password"
-              style={{ border:"none", outline:"none", flex:1, fontSize:14, color:"#111", fontFamily:"inherit" }}/>
-            <span onClick={()=>setShowNewPassword(!showNewPassword)} style={{ cursor:"pointer", color:"#9ca3af" }}>{showNewPassword?"🙈":"👁"}</span>
-          </div>
-        </div>
-        <button onClick={async()=>{
-          if(!newPassword) return;
-          try{
-            const hash = window.location.hash;
-            const hashParams = new URLSearchParams(hash.replace("#",""));
-            const accessToken = hashParams.get("access_token");
-            const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-              method: "PUT",
-              headers: {
-                "apikey": SUPABASE_KEY,
-                "Authorization": `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ password: newPassword }),
-            });
-            if(res.ok){ alert("Password updated!"); setScreen("signin"); window.history.replaceState({},""," /"); }
-            else{ alert("Reset failed. Link may have expired."); }
-          }catch(e){ alert("Error: " + e.message); }
-        }} style={{ width:"100%", padding:"14px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:14, fontFamily:"inherit" }}>Update Password</button>
         <div style={{ textAlign:"center" }}><span onClick={()=>setScreen("signin")} style={{ color:A, fontSize:14, fontWeight:600, cursor:"pointer" }}>Back to Sign In</span></div>
       </Card>
     </BG>
@@ -958,7 +875,7 @@ if (screen==="newpassword") return (
       {activePage==="dashboard"&&(
         <PageShell title="Dashboard" subtitle="Fleet inspection overview">
           <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16, marginBottom:24 }}>
-            {[["🕐","0","Scheduled"],["📋","0","In Progress",A],["✅","0","Submitted","#22c55e"],["📄","1","Report Ready","#3b82f6"]].map(([icon,val,label,color])=>(
+            {[["🕐","0","Scheduled"],["📋","0","In Progress",A],["✅","0","Submitted","#22c55e"],["📄","0","Report Ready","#3b82f6"]].map(([icon,val,label,color])=>(
               <div key={label} style={{ background:"#fff", borderRadius:12, padding:"20px 24px", display:"flex", alignItems:"center", gap:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
                 <span style={{ fontSize:26, color:color||P }}>{icon}</span>
                 <div><div style={{ fontSize:28, fontWeight:800, color:"#111" }}>{val}</div><div style={{ fontSize:13, color:"#6b7280", marginTop:2 }}>{label}</div></div>
