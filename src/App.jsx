@@ -26,12 +26,17 @@ const PARTICLES = Array.from({ length: 28 }, (_, i) => ({
 
 export default function App() {
   const getInitialScreen = () => {
-    const hash = window.location.hash;
-    if(hash && hash.includes("type=recovery")) return "newpassword";
     const urlParams = new URLSearchParams(window.location.search);
     const resetToken = urlParams.get('token');
     if(resetToken) return "newpassword";
-    if(localStorage.getItem("token")) return "app";
+    const savedToken = localStorage.getItem("token");
+    // Clear old dummy tokens - force real login
+    if(savedToken === "dummy-token"){
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      return "signin";
+    }
+    if(savedToken) return "app";
     return "signin";
   };
   const [screen, setScreen] = useState(getInitialScreen);
@@ -55,6 +60,13 @@ export default function App() {
   const [fleetOpen, setFleetOpen] = useState(false);
   const [showAddVessel, setShowAddVessel] = useState(false);
   const [vesselMenuOpen, setVesselMenuOpen] = useState(null);
+  const [assignMenuOpen, setAssignMenuOpen] = useState(null);
+  const [auditLog, setAuditLog] = useState([]);
+  const [dashboardStats, setDashboardStats] = useState({});
+  const [reviewReports, setReviewReports] = useState([]);
+  const [approvedReports, setApprovedReports] = useState([]);
+  const [capaList, setCapaList] = useState([]);
+  const [sessionsList, setSessionsList] = useState([]);
   const [selectedVessel, setSelectedVessel] = useState(null);
   const [newVessel, setNewVessel] = useState({ name: "", imo: "", type: "—", flag: "", operator: "", buildYear: "", fleet: "No fleet", notes: "" });
 
@@ -277,28 +289,12 @@ export default function App() {
   const [settingsDefaultProfiles, setSettingsDefaultProfiles] = useState({randomness:"None", scoring:"None", ai:"None", report:"None"});
   const [settingsNotifications, setSettingsNotifications] = useState({emailSubmission:false, emailReady:false, emailOverdue:false, slack:false});
 
-  const API = "https://sea-secure-backend-production.up.railway.app";
-const SUPABASE_URL = "https://opkvnopwrbsplsmjwwbo.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wa3Zub3B3cmJzcGxzbWp3d2JvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxNTMxMDMsImV4cCI6MjA4OTcyOTEwM30._gNXIWYySCX8k8Rb_brEaAM_J84A3Zk6tojB1i1lyT8";
-
-const sbFetch = async (path, options = {}) => {
-  const res = await fetch(`${SUPABASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": "return=representation",
-      ...(options.headers || {}),
-    },
-  });
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : [];
-  if (!res.ok) throw new Error(JSON.stringify(data));
-  return data;
-};
-  const getToken = () => localStorage.getItem("token");
-  const authHeader = () => ({ "Content-Type":"application/json", "Authorization":`Bearer ${getToken()}` });
+  const API = "http://127.0.0.1:8000";
+  const getToken = () => localStorage.getItem("token") || "";
+  const authHeader = () => ({ "Content-Type":"application/json", "Authorization": `Bearer ${getToken()}` });
+  const saveTemplateToBackend = (t) => {
+    fetch(`${API}/api/admin/templates/${t.id}`,{method:"PATCH",headers:authHeader(),body:JSON.stringify({name:t.name,description:t.description,version:String(t.version||"1.0"),sections:{status:t.status,drafts:t.drafts||0,draftVersions:t.draftVersions||[]}})}).catch(()=>{});
+  };
 
   useEffect(()=>{
     const urlParams = new URLSearchParams(window.location.search);
@@ -307,14 +303,91 @@ const sbFetch = async (path, options = {}) => {
     const authToken = localStorage.getItem("token");
     if(!authToken){ setScreen("signin"); return; }
     setScreen("app");
-    // Load all data from Supabase
-    sbFetch(`/rest/v1/fleets?select=*`).then(d=>setFleets(d||[]));
-    sbFetch(`/rest/v1/vessels?select=*,fleets(*)`).then(d=>setVessels(d||[]));
-    sbFetch(`/rest/v1/questions?select=*`).then(d=>setQuestions((d||[]).map(q=>({...q,text:q.question,subNumber:q.sub_number,subArea:q.sub_area,inspectionGuide:q.guide_to_inspection,evidenceRequired:q.evidence_required}))));
-    sbFetch(`/rest/v1/templates?select=*,template_versions(*)`).then(d=>setTemplates(d||[]));
-    sbFetch(`/rest/v1/assignments?select=*,vessels(*),template_versions(*,templates(*))`).then(d=>setAssignments(d||[]));
-    sbFetch(`/rest/v1/users?role=eq.inspector&select=*`).then(d=>setInspectors(d||[]));
-    sbFetch(`/rest/v1/users?select=*`).then(d=>setAdmins((d||[]).filter(u=>u.role==='admin'||u.role==='super_admin')));
+    // Load real data from backend
+    const hdr = { "Authorization": `Bearer ${authToken}` };
+    // Fleets + Vessels (fleets first so we can map fleet names)
+    fetch(`${API}/api/admin/fleets`,{headers:hdr}).then(r=>{
+      if(r.status===401){ localStorage.clear(); setScreen("signin"); throw new Error("session expired"); }
+      return r.json();
+    }).then(fd=>{
+      const fleetList = fd.success ? fd.data.map(f=>({...f, region:f.description, vessels:[]})) : [];
+      setFleets(fleetList);
+      fetch(`${API}/api/admin/vessels`,{headers:hdr}).then(r=>r.json()).then(vd=>{
+        if(vd.success) setVessels(vd.data.map(v=>({
+          id:v.id, name:v.name, imo:v.imo, type:v.type||"—", flag:v.flag||"—",
+          operator:v.operator||"—", build_year:v.build_year, status:"active",
+          fleet:(fleetList.find(f=>f.id===v.fleet_id)||{}).name||"—",
+        })));
+      }).catch(()=>{});
+    }).catch(()=>{});
+    // Question Bank
+    fetch(`${API}/api/admin/questions`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success) setQuestions(d.data.map(q=>({
+        ...q, text:q.question, subNumber:q.sub_number, subArea:q.sub_area,
+        inspectionGuide:q.guide_to_inspection, evidenceRequired:q.evidence_required,
+      })));
+    }).catch(()=>{});
+    // Templates
+    fetch(`${API}/api/admin/templates`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success) setTemplates(d.data.map(t=>({
+        id:t.id, name:t.name, description:t.description, version:t.version,
+        status:(t.sections&&t.sections.status)||"Draft",
+        drafts:(t.sections&&t.sections.drafts)||0,
+        draftVersions:(t.sections&&t.sections.draftVersions)||[],
+      })));
+    }).catch(()=>{});
+    // CA Library
+    fetch(`${API}/api/admin/ca-library`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success && d.data.length) setCaTemplates(d.data.map(c=>({
+        id:c.id, title:c.title, description:c.description||"",
+        severities:c.severity?c.severity.split(","):[], tags:c.category||"",
+        dueDays:"", status:"Active",
+      })));
+    }).catch(()=>{});
+    // Profiles (randomness, scoring, ai, report)
+    fetch(`${API}/api/admin/profiles`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success){
+        const byKind = k => d.data.filter(p=>p.kind===k).map(p=>({id:p.id,name:p.name,...(p.data||{})}));
+        setRandomnessProfiles(byKind("randomness"));
+        setScoringProfiles(byKind("scoring"));
+        setAiProfiles(byKind("ai"));
+        setReportProfiles(byKind("report"));
+      }
+    }).catch(()=>{});
+    // Inspectors
+    fetch(`${API}/api/auth/inspectors`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success) setInspectors(d.data.map(i=>({...i, status:"active"})));
+    }).catch(()=>{});
+    // Assignments
+    fetch(`${API}/api/admin/assignments`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success) setAssignments(d.data);
+    }).catch(()=>{});
+    // Audit Log
+    fetch(`${API}/api/admin/audit-log`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success) setAuditLog(d.data);
+    }).catch(()=>{});
+    // Dashboard stats
+    fetch(`${API}/api/admin/dashboard`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success) setDashboardStats(d.data);
+    }).catch(()=>{});
+    // Reports (all)
+    fetch(`${API}/api/admin/reports`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success){
+        setReviewReports(d.data.filter(r=>r.status==="pending_review"));
+        setApprovedReports(d.data.filter(r=>r.status==="approved"));
+      }
+    }).catch(()=>{});
+    // CAPAs
+    fetch(`${API}/api/admin/capas`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success) setCapaList(d.data);
+    }).catch(()=>{});
+    // Sessions
+    fetch(`${API}/api/admin/sessions`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success) setSessionsList(d.data);
+    }).catch(()=>{});
+    // Admins (current user)
+    const me = JSON.parse(localStorage.getItem("user")||"{}");
+    setAdmins([{id:me.id||"1", name:me.name||"Admin", email:me.email||"", role:me.role||"admin", status:"active"}]);
   }, []);
 
   const PALETTES = {
@@ -346,12 +419,14 @@ const sbFetch = async (path, options = {}) => {
   });
 
   const addVessel = async () => {
-    if (!newVessel.name) return;signin
+    if (!newVessel.name) return;
     try{
       const fleet = fleets.find(f=>f.name===newVessel.fleet);
       const r = await fetch(`${API}/api/admin/vessels`,{method:"POST",headers:authHeader(),body:JSON.stringify({name:newVessel.name,imo:newVessel.imo,type:newVessel.type,flag:newVessel.flag,operator:newVessel.operator,build_year:newVessel.buildYear?parseInt(newVessel.buildYear):null,fleet_id:fleet?fleet.id:null})});
+      if(r.status===401){ alert("Session expired. Please login again."); localStorage.clear(); setScreen("signin"); return; }
       const d = await r.json();
       if(d.success){ setVessels(prev=>[...prev,{...d.data,fleet:newVessel.fleet}]); setNewVessel({name:"",imo:"",type:"—",flag:"",operator:"",buildYear:"",fleet:"No fleet",notes:""}); setShowAddVessel(false); }
+      else { alert(d.message || "Could not add vessel"); }
     }catch(e){ alert("Error connecting to server"); }
   };
 
@@ -492,25 +567,22 @@ const sbFetch = async (path, options = {}) => {
             if(!loginEmail||!loginPassword){setLoginError("Email and password required");return;}
             setLoginLoading(true);setLoginError("");
             try{
-              const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+              const res = await fetch(`${API}/auth/login`, {
                 method: "POST",
-                headers: {
-                  "apikey": SUPABASE_KEY,
-                  "Content-Type": "application/json",
-                },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ email: loginEmail, password: loginPassword }),
               });
               const d = await res.json();
               if(res.ok && d.access_token){
                 localStorage.setItem("token", d.access_token);
-                const dbUsers = await sbFetch(`/rest/v1/users?email=ilike.${encodeURIComponent(loginEmail)}&select=*`);
-                const dbUser = dbUsers[0] || {};
-                localStorage.setItem("user", JSON.stringify({ id: d.user.id, email: d.user.email, name: dbUser.name || loginEmail, role: dbUser.role || "admin" }));
-                setScreen("app");
+                localStorage.setItem("user", JSON.stringify(d.user));
+                window.location.reload();
               } else {
-                setLoginError(d.message || "Login failed");
+                setLoginError(d.detail || "Invalid email or password");
               }
-            }catch(e){setLoginError("Cannot connect to server. Make sure backend is running.");}
+            }catch(e){
+              setLoginError("Cannot connect to server. Make sure backend is running.");
+            }
             setLoginLoading(false);
           }}
           style={{ width:"100%", padding:"14px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:16, fontWeight:700, cursor:"pointer", marginTop:20, marginBottom:14, fontFamily:"inherit", opacity:loginLoading?0.7:1 }}
@@ -537,57 +609,11 @@ const sbFetch = async (path, options = {}) => {
         <button onClick={async()=>{
           if(!email) return;
           try{
-            await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
-              method: "POST",
-              headers: {
-                "apikey": SUPABASE_KEY,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ 
-  email,
-  redirectTo: "http://localhost:5174"
-}),
-            });
-            setScreen("resetSent");
+            const r=await fetch(`${API}/api/auth/forgot-password`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+            const d=await r.json();
+            if(d.success){ setScreen("resetSent"); }
           }catch(e){ alert("Cannot connect to server"); }
         }} style={{ width:"100%", padding:"14px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:14, fontFamily:"inherit" }}>Send Reset Link</button>
-        <div style={{ textAlign:"center" }}><span onClick={()=>setScreen("signin")} style={{ color:A, fontSize:14, fontWeight:600, cursor:"pointer" }}>Back to Sign In</span></div>
-      </Card>
-    </BG>
-  );
-if (screen==="newpassword") return (
-    <BG><Logo title="Reset Password" sub="Admin Portal"/>
-      <Card maxWidth={460}>
-        <h2 style={{ fontSize:20, fontWeight:800, color:"#111", marginBottom:4 }}>Set new password</h2>
-        <p style={{ fontSize:14, color:"#6b7280", marginBottom:24 }}>Enter your new password below.</p>
-        <div style={{ marginBottom:16 }}>
-          <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>New Password</label>
-          <div style={{ display:"flex", alignItems:"center", border:"1.5px solid #e5e7eb", borderRadius:8, padding:"11px 14px", gap:10 }}>
-            <span style={{ color:"#9ca3af" }}>🔒</span>
-            <input value={newPassword} onChange={e=>setNewPassword(e.target.value)} type={showNewPassword?"text":"password"} placeholder="Enter new password"
-              style={{ border:"none", outline:"none", flex:1, fontSize:14, color:"#111", fontFamily:"inherit" }}/>
-            <span onClick={()=>setShowNewPassword(!showNewPassword)} style={{ cursor:"pointer", color:"#9ca3af" }}>{showNewPassword?"🙈":"👁"}</span>
-          </div>
-        </div>
-        <button onClick={async()=>{
-          if(!newPassword) return;
-          try{
-            const hash = window.location.hash;
-            const hashParams = new URLSearchParams(hash.replace("#",""));
-            const accessToken = hashParams.get("access_token");
-            const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-              method: "PUT",
-              headers: {
-                "apikey": SUPABASE_KEY,
-                "Authorization": `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ password: newPassword }),
-            });
-            if(res.ok){ alert("Password updated!"); setScreen("signin"); window.history.replaceState({},""," /"); }
-            else{ alert("Reset failed. Link may have expired."); }
-          }catch(e){ alert("Error: " + e.message); }
-        }} style={{ width:"100%", padding:"14px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:14, fontFamily:"inherit" }}>Update Password</button>
         <div style={{ textAlign:"center" }}><span onClick={()=>setScreen("signin")} style={{ color:A, fontSize:14, fontWeight:600, cursor:"pointer" }}>Back to Sign In</span></div>
       </Card>
     </BG>
@@ -817,9 +843,10 @@ if (screen==="newpassword") return (
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
               <div>
-                <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>Inspection Type</label>
+                <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>Template</label>
                 <select value={assignmentForm.type} onChange={e=>setAssignmentForm({...assignmentForm,type:e.target.value})} style={selectStyle2}>
-                  <option value="">Select type</option><option>PSC Readiness Audit</option><option>Pre-vetting Preparation</option><option>Condition Survey</option><option>Full Inspection</option>
+                  <option value="">Select template</option>
+                  {templates.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}
                 </select>
               </div>
               <div>
@@ -830,7 +857,8 @@ if (screen==="newpassword") return (
             <div style={{ marginBottom:16 }}>
               <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>Assign Inspector</label>
               <select value={assignmentForm.inspector} onChange={e=>setAssignmentForm({...assignmentForm,inspector:e.target.value})} style={selectStyle2}>
-                <option value="">Select inspector</option><option>Admin</option><option>Inspector 2</option>
+                <option value="">Select inspector</option>
+                {inspectors.map(i=><option key={i.id} value={i.name}>{i.name}</option>)}
               </select>
             </div>
             <div style={{ marginBottom:24 }}>
@@ -839,7 +867,7 @@ if (screen==="newpassword") return (
             </div>
             <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
               <button onClick={()=>setShowCreateAssignment(false)} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-              <button onClick={()=>{ setAssignmentForm({inspector:"",date:"",type:"",notes:""}); setShowCreateAssignment(false); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Create Assignment</button>
+              <button onClick={async()=>{ if(!selectedVessel||!assignmentForm.inspector){alert("Please select an inspector");return;} try{ const inspObj=inspectors.find(i=>i.name===assignmentForm.inspector); const tmplObj=templates.find(t=>t.name===assignmentForm.type); const r=await fetch(`${API}/api/admin/assignments`,{method:"POST",headers:authHeader(),body:JSON.stringify({vessel_id:selectedVessel.id,template_id:tmplObj?.id,inspector_id:inspObj?.id,due_date:assignmentForm.date?assignmentForm.date+"T00:00:00":null,notes:assignmentForm.notes||null})}); const d=await r.json(); if(d.success){ const rl=await fetch(`${API}/api/admin/assignments`,{headers:authHeader()}); const dl=await rl.json(); if(dl.success)setAssignments(dl.data); setAssignmentForm({inspector:"",date:"",type:"",notes:""}); setShowCreateAssignment(false); alert("Assignment created!"); } else alert("Failed: "+(d.message||"Unknown error")); }catch(e){alert("Error: "+e.message);} }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Create Assignment</button>
             </div>
           </div>
         </div>
@@ -893,7 +921,7 @@ if (screen==="newpassword") return (
             </div>
             <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:16 }}>
               <button onClick={()=>setShowEditVessel(false)} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-              <button onClick={()=>{ setVessels(prev=>prev.map(v=>v.id===editVesselData.id?editVesselData:v)); if(selectedVessel?.id===editVesselData.id)setSelectedVessel(editVesselData); setShowEditVessel(false); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Save Changes</button>
+              <button onClick={()=>{ fetch(`${API}/api/admin/vessels/${editVesselData.id}`,{method:"PATCH",headers:authHeader(),body:JSON.stringify({name:editVesselData.name,imo:editVesselData.imo,type:editVesselData.type,flag:editVesselData.flag,operator:editVesselData.operator,build_year:editVesselData.build_year})}).catch(()=>{}); setVessels(prev=>prev.map(v=>v.id===editVesselData.id?editVesselData:v)); if(selectedVessel?.id===editVesselData.id)setSelectedVessel(editVesselData); setShowEditVessel(false); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Save Changes</button>
             </div>
           </div>
         </div>
@@ -948,7 +976,7 @@ if (screen==="newpassword") return (
             </div>
             <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
               <button onClick={()=>{ setShowAddFleet(false); setNewFleetName(""); setNewFleetRegion(""); }} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-              <button onClick={async()=>{ if(!newFleetName)return; try{ const r=await fetch(`${API}/api/admin/fleets`,{method:"POST",headers:authHeader(),body:JSON.stringify({name:newFleetName,description:newFleetRegion||""})}); const d=await r.json(); if(d.success){setFleets(prev=>[...prev,{id:d.data.id,name:d.data.name,description:d.data.description,vessels:[]}]); setNewFleetName(""); setNewFleetRegion(""); setShowAddFleet(false);} }catch(e){alert("Error");} }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Add Fleet</button>
+              <button onClick={async()=>{ if(!newFleetName)return; try{ const r=await fetch(`${API}/api/admin/fleets`,{method:"POST",headers:authHeader(),body:JSON.stringify({name:newFleetName,description:newFleetRegion||""})}); const d=await r.json(); if(d.success){setFleets(prev=>[...prev,{id:d.data.id,name:d.data.name,description:d.data.description,region:d.data.description,vessels:[]}]); setNewFleetName(""); setNewFleetRegion(""); setShowAddFleet(false);} }catch(e){alert("Error");} }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Add Fleet</button>
             </div>
           </div>
         </div>
@@ -958,7 +986,7 @@ if (screen==="newpassword") return (
       {activePage==="dashboard"&&(
         <PageShell title="Dashboard" subtitle="Fleet inspection overview">
           <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16, marginBottom:24 }}>
-            {[["🕐","0","Scheduled"],["📋","0","In Progress",A],["✅","0","Submitted","#22c55e"],["📄","1","Report Ready","#3b82f6"]].map(([icon,val,label,color])=>(
+            {[["🚢",dashboardStats.total_vessels||0,"Vessels"],["📋",dashboardStats.total_assignments||0,"Assignments",A],["✅",dashboardStats.total_templates||0,"Templates","#22c55e"],["👥",dashboardStats.total_inspectors||0,"Inspectors","#3b82f6"]].map(([icon,val,label,color])=>(
               <div key={label} style={{ background:"#fff", borderRadius:12, padding:"20px 24px", display:"flex", alignItems:"center", gap:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
                 <span style={{ fontSize:26, color:color||P }}>{icon}</span>
                 <div><div style={{ fontSize:28, fontWeight:800, color:"#111" }}>{val}</div><div style={{ fontSize:13, color:"#6b7280", marginTop:2 }}>{label}</div></div>
@@ -967,10 +995,10 @@ if (screen==="newpassword") return (
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:24 }}>
             <div style={{ background:"#fff", borderRadius:12, padding:"20px 24px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-              <h3 style={{ fontSize:16, fontWeight:700, color:"#111", marginBottom:16 }}>Failures by Category</h3>
-              <div style={{ display:"flex", gap:24, fontSize:14 }}>
-                {[["Critical","0","#ef4444"],["Major","0","#f97316"],["Minor","0","#f59e0b"],["Info","0","#3b82f6"]].map(([l,v,c])=>(
-                  <div key={l} style={{ display:"flex", alignItems:"center", gap:6 }}><span style={{ fontWeight:600, color:"#6b7280" }}>{l}:</span><span style={{ fontWeight:800, color:c, fontSize:16 }}>{v}</span></div>
+              <h3 style={{ fontSize:16, fontWeight:700, color:"#111", marginBottom:16 }}>Operations Overview</h3>
+              <div style={{ display:"flex", flexDirection:"column", gap:12, fontSize:14 }}>
+                {[["Active Sessions",dashboardStats.active_sessions||0,"#3b82f6"],["Pending Reviews",dashboardStats.pending_reviews||0,"#f59e0b"],["Open CAPAs",dashboardStats.open_capas||0,"#ef4444"],["Total Fleets",dashboardStats.total_fleets||0,"#22c55e"],["Total Questions",dashboardStats.total_questions||0,"#8b5cf6"]].map(([l,v,c])=>(
+                  <div key={l} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}><span style={{ fontWeight:600, color:"#6b7280" }}>{l}</span><span style={{ fontWeight:800, color:c, fontSize:18 }}>{v}</span></div>
                 ))}
               </div>
             </div>
@@ -1012,7 +1040,7 @@ if (screen==="newpassword") return (
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
               <div style={{ background:"#fff", borderRadius:12, padding:"20px 24px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
                 <h3 style={{ fontSize:16, fontWeight:700, color:"#111", marginBottom:16 }}>Vessel Profile</h3>
-                {[["Operator",selectedVessel.operator||"—"],["Build Year",selectedVessel.buildYear||"—"],["Flag",selectedVessel.flag||"—"],["Type",selectedVessel.type||"—"]].map(([k,v])=>(
+                {[["Operator",selectedVessel.operator||"—"],["Build Year",selectedVessel.build_year||selectedVessel.buildYear||"—"],["Flag",selectedVessel.flag||"—"],["Type",selectedVessel.type||"—"]].map(([k,v])=>(
                   <div key={k} style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom:"1px solid #f3f4f6", fontSize:14 }}>
                     <span style={{ color:"#6b7280" }}>{k}</span><span style={{ color:"#111", fontWeight:500 }}>{v}</span>
                   </div>
@@ -1073,7 +1101,7 @@ if (screen==="newpassword") return (
                         <div style={{ position:"absolute", right:8, top:44, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.12)", zIndex:100, minWidth:140, overflow:"hidden" }}>
                           <div onClick={()=>{ setSelectedVessel(v); setVesselMenuOpen(null); }} style={{ padding:"11px 18px", fontSize:14, color:"#111", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>View</div>
                           <div onClick={()=>{ setEditVesselData({...v}); setShowEditVessel(true); setVesselMenuOpen(null); }} style={{ padding:"11px 18px", fontSize:14, color:"#111", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Edit</div>
-                          <div onClick={()=>{ setVessels(prev=>prev.filter(x=>x.id!==v.id)); setVesselMenuOpen(null); }} style={{ padding:"11px 18px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                          <div onClick={()=>{ fetch(`${API}/api/admin/vessels/${v.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); setVessels(prev=>prev.filter(x=>x.id!==v.id)); setVesselMenuOpen(null); }} style={{ padding:"11px 18px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
                         </div>
                       )}
                     </td>
@@ -1118,7 +1146,7 @@ if (screen==="newpassword") return (
                             <div style={{ position:"absolute", right:8, top:44, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 32px rgba(0,0,0,0.18)", zIndex:1000, minWidth:140, overflow:"hidden" }} onClick={e=>e.stopPropagation()}>
                               <div onClick={()=>{ setEditFleetData({...f}); setShowEditFleet(true); setFleetMenuOpen(null); }} style={{ padding:"11px 18px", fontSize:14, color:"#111", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Edit</div>
                               <div style={{ height:1, background:"#fee2e2", margin:"2px 0" }}/>
-                              <div onClick={()=>{ setFleets(prev=>prev.filter(x=>x.id!==f.id)); if(selectedFleet?.id===f.id)setSelectedFleet(null); setFleetMenuOpen(null); }} style={{ padding:"11px 18px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                              <div onClick={()=>{ fetch(`${API}/api/admin/fleets/${f.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); setFleets(prev=>prev.filter(x=>x.id!==f.id)); if(selectedFleet?.id===f.id)setSelectedFleet(null); setFleetMenuOpen(null); }} style={{ padding:"11px 18px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
                             </div>
                           )}
                         </td>
@@ -1161,6 +1189,7 @@ if (screen==="newpassword") return (
                   <button onClick={()=>{ setShowEditFleet(false); setEditFleetData(null); }} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
                   <button onClick={()=>{
                     if(!editFleetData.name)return;
+                    fetch(`${API}/api/admin/fleets/${editFleetData.id}`,{method:"PATCH",headers:authHeader(),body:JSON.stringify({name:editFleetData.name,description:editFleetData.region||""})}).catch(()=>{});
                     setFleets(prev=>prev.map(x=>x.id===editFleetData.id?{...x,name:editFleetData.name,region:editFleetData.region}:x));
                     if(selectedFleet?.id===editFleetData.id) setSelectedFleet(prev=>({...prev,name:editFleetData.name,region:editFleetData.region}));
                     setShowEditFleet(false); setEditFleetData(null);
@@ -1695,7 +1724,7 @@ if (screen==="newpassword") return (
                             <div onClick={()=>{setEditQData({...q});setShowEditQuestion(true);setQbMenuOpen(null);}} style={{padding:"11px 16px",fontSize:14,color:"#111",cursor:"pointer"}} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Edit</div>
                             <div onClick={()=>{ setAiParamsQuestion(q); setAiP({ evidenceType:q.aiParams?.evidenceType||"Photo", ocrRequired:q.aiParams?.ocrRequired||false, objectPresenceList:q.aiParams?.objectPresenceList||"", conditionClassification:q.aiParams?.conditionClassification||"", acceptableRanges:q.aiParams?.acceptableRanges||"", autoAcceptAbove:q.aiParams?.autoAcceptAbove||"0.95", flagBelowReview:q.aiParams?.flagBelowReview||"0.70", routingRules:q.aiParams?.routingRules||[], suggestedCAs:q.aiParams?.suggestedCAs||[], newRuleCondition:"", newRuleReviewer:"", selectedCA:"" }); setAiHowToOpen(true); setQbMenuOpen(null); }} style={{padding:"11px 16px",fontSize:14,color:"#111",cursor:"pointer"}} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>AI Parameters</div>
                             <div style={{height:1,background:"#fee2e2",margin:"2px 0"}}/>
-                            <div onClick={()=>{setQuestions(prev=>prev.filter(x=>x.id!==q.id));setQbMenuOpen(null);}} style={{padding:"11px 16px",fontSize:14,color:"#ef4444",cursor:"pointer"}} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                            <div onClick={()=>{fetch(`${API}/api/admin/questions/${q.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{});setQuestions(prev=>prev.filter(x=>x.id!==q.id));setQbMenuOpen(null);}} style={{padding:"11px 16px",fontSize:14,color:"#ef4444",cursor:"pointer"}} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
                           </div>}
                         </td>
                       </tr>
@@ -1853,7 +1882,7 @@ if (screen==="newpassword") return (
                   </div>
                   <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
                     <button onClick={()=>setShowEditQuestion(false)} style={{padding:"10px 22px",background:"#fff",border:"1.5px solid #e5e7eb",borderRadius:8,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",color:"#111"}}>Cancel</button>
-                    <button onClick={()=>{setQuestions(prev=>prev.map(x=>x.id===editQData.id?{...editQData}:x));setShowEditQuestion(false);}} style={{padding:"10px 22px",background:P,border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",color:"#fff"}}>Save Changes</button>
+                    <button onClick={()=>{fetch(`${API}/api/admin/questions/${editQData.id}`,{method:"PATCH",headers:authHeader(),body:JSON.stringify({question:editQData.text,sub_number:editQData.subNumber,category:editQData.category,sub_area:editQData.subArea,severity:editQData.severity,type:editQData.type,evidence_required:editQData.evidenceRequired,guide_to_inspection:editQData.inspectionGuide})}).catch(()=>{});setQuestions(prev=>prev.map(x=>x.id===editQData.id?{...editQData}:x));setShowEditQuestion(false);}} style={{padding:"10px 22px",background:P,border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",color:"#fff"}}>Save Changes</button>
                   </div>
                 </div>
               </div>
@@ -1998,7 +2027,7 @@ if (screen==="newpassword") return (
                           <button onClick={e=>{ e.stopPropagation(); setCaMenuOpen(caMenuOpen===t.id?null:t.id); }} style={{ background:"none", border:"1px solid #e5e7eb", borderRadius:7, cursor:"pointer", color:"#6b7280", fontSize:14, fontWeight:700, letterSpacing:"2px", padding:"3px 8px" }}>•••</button>
                           {caMenuOpen===t.id&&<div style={{ position:"absolute", right:8, top:44, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 28px rgba(0,0,0,0.15)", zIndex:999, minWidth:140, overflow:"hidden" }} onClick={e=>e.stopPropagation()}>
                             <div onClick={()=>{ setEditCAData({...t}); setShowEditCA(true); setCaMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#111", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Edit</div>
-                            <div onClick={()=>{ setCaTemplates(prev=>prev.filter(x=>x.id!==t.id)); setCaMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                            <div onClick={()=>{ fetch(`${API}/api/admin/ca-library/${t.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); setCaTemplates(prev=>prev.filter(x=>x.id!==t.id)); setCaMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
                           </div>}
                         </td>
                       </tr>
@@ -2030,7 +2059,7 @@ if (screen==="newpassword") return (
                   </div>
                   <div style={{ padding:"16px 28px", borderTop:"1px solid #f3f4f6", display:"flex", gap:10, justifyContent:"flex-end" }}>
                     <button onClick={()=>{ setShowAddCA(false); setNewCA({title:"",description:"",severities:[],dueDays:"",tags:"",status:"Active"}); }} style={{ padding:"10px 24px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-                    <button onClick={()=>{ if(!newCA.title)return; setCaTemplates(prev=>[...prev,{id:Date.now(),...newCA,status:"Active"}]); setNewCA({title:"",description:"",severities:[],dueDays:"",tags:"",status:"Active"}); setShowAddCA(false); }} style={{ padding:"10px 24px", background:newCA.title?P:"#9ca3af", border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:newCA.title?"pointer":"not-allowed", fontFamily:"inherit", color:"#fff" }}>Save Template</button>
+                    <button onClick={async()=>{ if(!newCA.title)return; try{ const r=await fetch(`${API}/api/admin/ca-library`,{method:"POST",headers:authHeader(),body:JSON.stringify({title:newCA.title,description:newCA.description,severity:(newCA.severities||[]).join(","),category:newCA.tags})}); const d=await r.json(); if(d.success){ setCaTemplates(prev=>[...prev,{id:d.data.id,...newCA,status:"Active"}]); setNewCA({title:"",description:"",severities:[],dueDays:"",tags:"",status:"Active"}); setShowAddCA(false);} }catch(e){alert("Error");} }} style={{ padding:"10px 24px", background:newCA.title?P:"#9ca3af", border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:newCA.title?"pointer":"not-allowed", fontFamily:"inherit", color:"#fff" }}>Save Template</button>
                   </div>
                 </div>
               </div>
@@ -2055,7 +2084,7 @@ if (screen==="newpassword") return (
                   </div>
                   <div style={{ padding:"16px 28px", borderTop:"1px solid #f3f4f6", display:"flex", gap:10, justifyContent:"flex-end" }}>
                     <button onClick={()=>{ setShowEditCA(false); }} style={{ padding:"10px 24px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-                    <button onClick={()=>{ setCaTemplates(prev=>prev.map(x=>x.id===editCAData.id?{...x,...editCAData}:x)); setShowEditCA(false); }} style={{ padding:"10px 24px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Save Changes</button>
+                    <button onClick={()=>{ fetch(`${API}/api/admin/ca-library/${editCAData.id}`,{method:"PATCH",headers:authHeader(),body:JSON.stringify({title:editCAData.title,description:editCAData.description,severity:(editCAData.severities||[]).join(","),category:editCAData.tags})}).catch(()=>{}); setCaTemplates(prev=>prev.map(x=>x.id===editCAData.id?{...x,...editCAData}:x)); setShowEditCA(false); }} style={{ padding:"10px 24px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Save Changes</button>
                   </div>
                 </div>
               </div>
@@ -2154,7 +2183,7 @@ if (screen==="newpassword") return (
                           <button onClick={e=>{ e.stopPropagation(); setTmplMenuOpen(tmplMenuOpen===t.id?null:t.id); }} style={{ background:"none", border:"1px solid #e5e7eb", borderRadius:7, cursor:"pointer", color:"#6b7280", fontSize:14, fontWeight:700, letterSpacing:"2px", padding:"3px 8px" }}>•••</button>
                           {tmplMenuOpen===t.id&&<div style={{ position:"absolute", right:8, top:44, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 28px rgba(0,0,0,0.15)", zIndex:999, minWidth:160, overflow:"hidden" }} onClick={e=>e.stopPropagation()}>
                             <div onClick={()=>{ setEditTmplData({...t}); setShowEditTemplate(true); setTmplMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#111", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Edit</div>
-                            <div onClick={()=>{ setTemplates(prev=>prev.filter(x=>x.id!==t.id)); setTmplMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                            <div onClick={()=>{ fetch(`${API}/api/admin/templates/${t.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); setTemplates(prev=>prev.filter(x=>x.id!==t.id)); setTmplMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
                           </div>}
                         </td>
                       </tr>
@@ -2174,7 +2203,7 @@ if (screen==="newpassword") return (
                 <div style={{ marginBottom:28 }}><label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:8 }}>Description</label><textarea value={newTmpl.description} onChange={e=>setNewTmpl({...newTmpl,description:e.target.value})} rows={3} style={{ ...inputStyle, resize:"vertical" }}/></div>
                 <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
                   <button onClick={()=>{ setShowCreateTemplate(false); setNewTmpl({name:"",description:""}); }} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-                  <button onClick={()=>{ if(!newTmpl.name)return; const t={id:Date.now(),name:newTmpl.name,description:newTmpl.description,version:"—",drafts:0,status:"Draft",draftVersions:[]}; setTemplates(prev=>[...prev,t]); setNewTmpl({name:"",description:""}); setShowCreateTemplate(false); setSelectedTemplate(t); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Create Template</button>
+                  <button onClick={async()=>{ if(!newTmpl.name)return; try{ const r=await fetch(`${API}/api/admin/templates`,{method:"POST",headers:authHeader(),body:JSON.stringify({name:newTmpl.name,description:newTmpl.description,version:"1.0",sections:{status:"Draft",drafts:0,draftVersions:[]}})}); const d=await r.json(); if(d.success){ const t={id:d.data.id,name:d.data.name,description:d.data.description,version:"—",drafts:0,status:"Draft",draftVersions:[]}; setTemplates(prev=>[...prev,t]); setNewTmpl({name:"",description:""}); setShowCreateTemplate(false); setSelectedTemplate(t);} }catch(e){alert("Error creating template");} }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Create Template</button>
                 </div>
               </div>
             </div>
@@ -2188,7 +2217,7 @@ if (screen==="newpassword") return (
                 <div style={{ marginBottom:28 }}><label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:8 }}>Description</label><textarea value={editTmplData.description||""} onChange={e=>setEditTmplData({...editTmplData,description:e.target.value})} rows={3} style={{ ...inputStyle, resize:"vertical" }}/></div>
                 <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
                   <button onClick={()=>{ setShowEditTemplate(false); setEditTmplData(null); }} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-                  <button onClick={()=>{ setTemplates(prev=>prev.map(t=>t.id===editTmplData.id?{...t,...editTmplData}:t)); setShowEditTemplate(false); setEditTmplData(null); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Save Changes</button>
+                  <button onClick={()=>{ fetch(`${API}/api/admin/templates/${editTmplData.id}`,{method:"PATCH",headers:authHeader(),body:JSON.stringify({name:editTmplData.name,description:editTmplData.description})}).catch(()=>{}); setTemplates(prev=>prev.map(t=>t.id===editTmplData.id?{...t,...editTmplData}:t)); setShowEditTemplate(false); setEditTmplData(null); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Save Changes</button>
                 </div>
               </div>
             </div>
@@ -2284,7 +2313,7 @@ if (screen==="newpassword") return (
                         <td style={{ padding:"14px 16px" }}>{d.status==="Published"?<span style={{ background:P, color:"#fff", borderRadius:20, padding:"4px 14px", fontSize:12, fontWeight:600 }}>Published</span>:<span style={{ background:"#fff", color:"#374151", borderRadius:20, padding:"3px 12px", fontSize:12, border:"1.5px solid #e5e7eb" }}>Draft</span>}</td>
                         <td style={{ padding:"14px 16px", color:"#6b7280" }}>{d.created}</td>
                         <td style={{ padding:"14px 16px", textAlign:"right" }} onClick={e=>e.stopPropagation()}>
-                          <button onClick={()=>{ const copy={id:Date.now(),version:d.version+" (copy)",status:"Draft",structure:d.structure||[],created:new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}; const updated={...selectedTemplate,draftVersions:[...(selectedTemplate.draftVersions||[]),copy],drafts:(selectedTemplate.drafts||0)+1}; setTemplates(prev=>prev.map(t=>t.id===selectedTemplate.id?updated:t)); setSelectedTemplate(updated); }}
+                          <button onClick={()=>{ const copy={id:Date.now(),version:d.version+" (copy)",status:"Draft",structure:d.structure||[],created:new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}; const updated={...selectedTemplate,draftVersions:[...(selectedTemplate.draftVersions||[]),copy],drafts:(selectedTemplate.drafts||0)+1}; setTemplates(prev=>prev.map(t=>t.id===selectedTemplate.id?updated:t)); setSelectedTemplate(updated); saveTemplateToBackend(updated); }}
                             style={{ padding:"6px 16px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>Duplicate</button>
                         </td>
                       </tr>
@@ -2306,7 +2335,7 @@ if (screen==="newpassword") return (
                 </div>
                 <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
                   <button onClick={()=>setShowNewDraft(false)} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-                  <button onClick={()=>{ if(!newDraftVersion)return; const draft={id:Date.now(),version:newDraftVersion,status:"Draft",structure:[],created:new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}; const updatedTemplate={...selectedTemplate,draftVersions:[...(selectedTemplate.draftVersions||[]),draft],version:newDraftVersion,drafts:(selectedTemplate.drafts||0)+1}; setTemplates(prev=>prev.map(t=>t.id===selectedTemplate.id?updatedTemplate:t)); setSelectedTemplate(updatedTemplate); setShowNewDraft(false); setSelectedDraft(draft); setBuilderTab("Structure"); setTmplStructure([]); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Create Draft</button>
+                  <button onClick={()=>{ if(!newDraftVersion)return; const draft={id:Date.now(),version:newDraftVersion,status:"Draft",structure:[],created:new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}; const updatedTemplate={...selectedTemplate,draftVersions:[...(selectedTemplate.draftVersions||[]),draft],version:newDraftVersion,drafts:(selectedTemplate.drafts||0)+1}; setTemplates(prev=>prev.map(t=>t.id===selectedTemplate.id?updatedTemplate:t)); setSelectedTemplate(updatedTemplate); saveTemplateToBackend(updatedTemplate); setShowNewDraft(false); setSelectedDraft(draft); setBuilderTab("Structure"); setTmplStructure([]); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Create Draft</button>
                 </div>
               </div>
             </div>
@@ -2396,8 +2425,8 @@ if (screen==="newpassword") return (
               </div>
               {selectedDraft.status!=="Published"&&(
                 <div style={{ display:"flex", gap:10 }}>
-                  <button style={{ padding:"10px 20px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>Save Draft</button>
-                  <button onClick={()=>{ setTemplates(prev=>prev.map(t=>t.id===selectedTemplate.id?{...t,status:"Published",version:selectedDraft.version}:t)); setSelectedDraft({...selectedDraft,status:"Published"}); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Publish</button>
+                  <button onClick={()=>{ const updatedDraft={...selectedDraft,structure:tmplStructure}; const updated={...selectedTemplate,draftVersions:(selectedTemplate.draftVersions||[]).map(dv=>dv.id===selectedDraft.id?updatedDraft:dv)}; setTemplates(prev=>prev.map(t=>t.id===selectedTemplate.id?updated:t)); setSelectedTemplate(updated); setSelectedDraft(updatedDraft); saveTemplateToBackend(updated); alert("Draft saved!"); }} style={{ padding:"10px 20px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>Save Draft</button>
+                  <button onClick={()=>{ const updatedDraft={...selectedDraft,structure:tmplStructure,status:"Published"}; const updated={...selectedTemplate,status:"Published",version:selectedDraft.version,draftVersions:(selectedTemplate.draftVersions||[]).map(dv=>dv.id===selectedDraft.id?updatedDraft:dv)}; setTemplates(prev=>prev.map(t=>t.id===selectedTemplate.id?updated:t)); setSelectedTemplate(updated); setSelectedDraft(updatedDraft); saveTemplateToBackend(updated); }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Publish</button>
                 </div>
               )}
             </div>
@@ -2461,9 +2490,9 @@ if (screen==="newpassword") return (
                 {/* Top row: Scoring + AI */}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
                   {[
-                    { key:"scoring", label:"Scoring Profile", desc:"Defines how answers are scored and what thresholds determine pass/conditional/fail outcomes", val:scoringProfile, setVal:setScoringProfile, page:"scoring" },
-                    { key:"ai", label:"AI Profile", desc:"Configures AI model, confidence thresholds, and how AI findings are routed for review", val:aiProfile, setVal:setAiProfile, page:"aiprofiles" },
-                  ].map(({key,label,desc,val,setVal,page})=>(
+                    { key:"scoring", label:"Scoring Profile", desc:"Defines how answers are scored and what thresholds determine pass/conditional/fail outcomes", val:scoringProfile, setVal:setScoringProfile, page:"scoring", options:scoringProfiles },
+                    { key:"ai", label:"AI Profile", desc:"Configures AI model, confidence thresholds, and how AI findings are routed for review", val:aiProfile, setVal:setAiProfile, page:"aiprofiles", options:aiProfiles },
+                  ].map(({key,label,desc,val,setVal,page,options})=>(
                     <div key={key} style={{ background:"#fff", borderRadius:12, padding:"24px 26px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", border:"1px solid #f3f4f6" }}>
                       {/* Title + info icon */}
                       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
@@ -2471,12 +2500,12 @@ if (screen==="newpassword") return (
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                       </div>
                       <p style={{ fontSize:13, color:"#6b7280", marginBottom:16, lineHeight:1.6 }}>{desc}</p>
-                      {/* Custom dropdown */}
-                      <div style={{ position:"relative", marginBottom:16 }}>
-                        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, color:val?"#111":"#9ca3af", background:"#fff", cursor:"pointer" }}>
-                          <span>{val||"Select..."}</span>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
-                        </div>
+                      {/* Real dropdown */}
+                      <div style={{ marginBottom:16 }}>
+                        <select value={val||""} onChange={e=>setVal(e.target.value)} style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, color:val?"#111":"#9ca3af", background:"#fff", cursor:"pointer", fontFamily:"inherit", appearance:"none", backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E\")", backgroundRepeat:"no-repeat", backgroundPosition:"right 14px center", paddingRight:36 }}>
+                          <option value="">Select...</option>
+                          {(options||[]).map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+                        </select>
                       </div>
                       {/* View / Edit Profile link */}
                       <button onClick={()=>setActivePage(page)} style={{ display:"flex", alignItems:"center", gap:7, background:"none", border:"none", cursor:"pointer", fontSize:13, color:"#374151", fontFamily:"inherit", padding:0, fontWeight:500 }}>
@@ -2494,11 +2523,11 @@ if (screen==="newpassword") return (
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                     </div>
                     <p style={{ fontSize:13, color:"#6b7280", marginBottom:16, lineHeight:1.6 }}>Controls report format, branding, section order, and finding wording style</p>
-                    <div style={{ position:"relative", marginBottom:16 }}>
-                      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, color:reportProfile?"#111":"#9ca3af", background:"#fff", cursor:"pointer" }}>
-                        <span>{reportProfile||"Select..."}</span>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
-                      </div>
+                    <div style={{ marginBottom:16 }}>
+                      <select value={reportProfile||""} onChange={e=>setReportProfile(e.target.value)} style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, color:reportProfile?"#111":"#9ca3af", background:"#fff", cursor:"pointer", fontFamily:"inherit", appearance:"none", backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E\")", backgroundRepeat:"no-repeat", backgroundPosition:"right 14px center", paddingRight:36 }}>
+                        <option value="">Select...</option>
+                        {(reportProfiles||[]).map(p=><option key={p.id} value={p.name}>{p.name}</option>)}
+                      </select>
                     </div>
                     <button onClick={()=>setActivePage("reportprofiles")} style={{ display:"flex", alignItems:"center", gap:7, background:"none", border:"none", cursor:"pointer", fontSize:13, color:"#374151", fontFamily:"inherit", padding:0, fontWeight:500 }}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
@@ -2641,7 +2670,7 @@ if (screen==="newpassword") return (
                     <td style={{ padding:"14px 16px", textAlign:"right" }} onClick={e=>e.stopPropagation()}>
                       <button onClick={e=>{ e.stopPropagation(); setRandMenuOpen(randMenuOpen===p.id?null:p.id); }} style={{ background:"none", border:"none", cursor:"pointer", color:"#9ca3af", fontSize:18, fontWeight:700 }}>•••</button>
                       {randMenuOpen===p.id&&<div style={{ position:"absolute", right:20, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.15)", zIndex:999, minWidth:140 }}>
-                        <div onClick={()=>{ setRandomnessProfiles(prev=>prev.filter(x=>x.id!==p.id)); setRandMenuOpen(null); }} style={{ padding:"11px 18px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                        <div onClick={()=>{ fetch(`${API}/api/admin/profiles/${p.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); setRandomnessProfiles(prev=>prev.filter(x=>x.id!==p.id)); setRandMenuOpen(null); }} style={{ padding:"11px 18px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
                       </div>}
                     </td>
                   </tr>
@@ -2968,7 +2997,7 @@ if (screen==="newpassword") return (
                     {randStep>1&&<button onClick={()=>setRandStep(randStep-1)} style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 20px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>‹ Back</button>}
                     {randStep<6
                       ?<button onClick={()=>setRandStep(randStep+1)} style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Next ›</button>
-                      :<button onClick={()=>{ if(!randProfile.name)return; setRandomnessProfiles(prev=>[...prev,{id:Date.now(),name:randProfile.name,appliesTo:randProfile.appliesTo,selectionTiming:randProfile.selectionTiming}]); setShowAddProfile(false); setRandProfile({name:"",description:"",appliesTo:"All Vessel Types",selectionTiming:"On Inspection Start"}); }} style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>
+                      :<button onClick={async()=>{ if(!randProfile.name)return; try{ const r=await fetch(`${API}/api/admin/profiles`,{method:"POST",headers:authHeader(),body:JSON.stringify({kind:"randomness",name:randProfile.name,data:{appliesTo:randProfile.appliesTo,selectionTiming:randProfile.selectionTiming}})}); const d=await r.json(); if(d.success){ setRandomnessProfiles(prev=>[...prev,{id:d.data.id,name:randProfile.name,appliesTo:randProfile.appliesTo,selectionTiming:randProfile.selectionTiming}]); setShowAddProfile(false); setRandProfile({name:"",description:"",appliesTo:"All Vessel Types",selectionTiming:"On Inspection Start"});} }catch(e){alert("Error");} }} style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                         Save Profile
                       </button>
@@ -3274,23 +3303,32 @@ if (screen==="newpassword") return (
                 <thead><tr style={{ borderBottom:"1px solid #f3f4f6" }}>{["VESSEL","FLEET","TEMPLATE","INSPECTOR","DUE","STATUS",""].map(h=><th key={h} style={{ textAlign:"left", padding:"12px 16px", color:"#6b7280", fontWeight:700, fontSize:11, letterSpacing:"0.05em" }}>{h}</th>)}</tr></thead>
                 <tbody>
                   {assignments.length===0?<tr><td colSpan={7}><EmptyState msg="No assignments yet. Click Create Assignment to start."/></td></tr>
-                  :assignments.map(a=>(
-                    <tr key={a.id} style={{ borderBottom:"1px solid #f9fafb" }} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
+                  :assignments.map(a=>{
+                    const v=vessels.find(x=>x.id===a.vessel_id||x.name===a.vessel);
+                    return (
+                    <tr key={a.id} style={{ borderBottom:"1px solid #f9fafb", position:"relative" }} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
                       <td style={{ padding:"14px 16px" }}>
-                        <span style={{ fontWeight:600, color:"#111" }}>{a.vessel}</span>
-                        {a.imo&&<span style={{ fontSize:12, color:"#9ca3af", marginLeft:6 }}>{a.imo}</span>}
+                        <span style={{ fontWeight:600, color:"#111" }}>{a.vessel||v?.name||"—"}</span>
+                        {v?.imo&&<span style={{ fontSize:12, color:"#9ca3af", marginLeft:6 }}>{v.imo}</span>}
                       </td>
-                      <td style={{ padding:"14px 16px", color:"#374151" }}>{a.fleet||"—"}</td>
-                      <td style={{ padding:"14px 16px", color:"#374151" }}>{a.templateVersion||"—"}</td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>{v?.fleet||"—"}</td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>{a.template||a.templateVersion||"—"}</td>
                       <td style={{ padding:"14px 16px", color:"#374151" }}>{a.inspector||"—"}</td>
-                      <td style={{ padding:"14px 16px", color:"#374151", whiteSpace:"nowrap" }}>{a.dueDate||"—"}</td>
+                      <td style={{ padding:"14px 16px", color:"#374151", whiteSpace:"nowrap" }}>{a.due_date?new Date(a.due_date).toLocaleDateString("en-GB"):(a.dueDate||"—")}</td>
                       <td style={{ padding:"14px 16px" }}>
                         <span style={{ background:"#f3f4f6", color:"#374151", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{a.status||"assigned"}</span>
-                        {a.session&&<div style={{ fontSize:11, color:"#9ca3af", marginTop:3 }}>Session: {a.session}</div>}
                       </td>
-                      <td style={{ padding:"14px 16px", textAlign:"right" }}><button style={{ background:"none", border:"1px solid #e5e7eb", borderRadius:7, cursor:"pointer", color:"#6b7280", fontSize:14, fontWeight:700, letterSpacing:"2px", padding:"3px 8px" }}>•••</button></td>
+                      <td style={{ padding:"14px 16px", textAlign:"right", position:"relative" }}>
+                        <button onClick={e=>{ e.stopPropagation(); setAssignMenuOpen(assignMenuOpen===a.id?null:a.id); }} style={{ background:"none", border:"1px solid #e5e7eb", borderRadius:7, cursor:"pointer", color:"#6b7280", fontSize:14, fontWeight:700, letterSpacing:"2px", padding:"3px 8px" }}>•••</button>
+                        {assignMenuOpen===a.id&&(
+                          <div style={{ position:"absolute", right:16, top:"100%", background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.12)", zIndex:60, minWidth:140 }} onClick={e=>e.stopPropagation()}>
+                            <div onClick={()=>{ if(!confirm("Delete this assignment?"))return; fetch(`${API}/api/admin/assignments/${a.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); setAssignments(prev=>prev.filter(x=>x.id!==a.id)); setAssignMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                          </div>
+                        )}
+                      </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -3326,8 +3364,8 @@ if (screen==="newpassword") return (
                     <div style={{ fontSize:12, color:"#9ca3af", marginBottom:8 }}>Required - published only</div>
                     <select value={newAssignment.templateVersion} onChange={e=>setNewAssignment({...newAssignment,templateVersion:e.target.value})}
                       style={{ ...inputStyle, background:"#fff", appearance:"none", backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E\")", backgroundRepeat:"no-repeat", backgroundPosition:"right 14px center", cursor:"pointer" }}>
-                      <option value="">Select template version</option>
-                      {templates.flatMap(t=>(t.draftVersions||[]).filter(d=>d.status==="Published").map(d=><option key={d.id} value={`${t.name} v${d.version}`}>{t.name} v{d.version}</option>))}
+                      <option value="">Select template</option>
+                      {templates.map(t=><option key={t.id} value={t.name}>{t.name}</option>)}
                     </select>
                   </div>
 
@@ -3344,9 +3382,7 @@ if (screen==="newpassword") return (
                     <select value={newAssignment.inspector} onChange={e=>setNewAssignment({...newAssignment,inspector:e.target.value})}
                       style={{ ...inputStyle, background:"#fff", appearance:"none", backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E\")", backgroundRepeat:"no-repeat", backgroundPosition:"right 14px center", cursor:"pointer" }}>
                       <option value="">Select inspector</option>
-                      <option>Capt. Rashid Al Mansoori</option>
-                      <option>Chief Officer Santos</option>
-                      <option>Inspector Ahmed Al Farsi</option>
+                      {inspectors.map(i=><option key={i.id} value={i.name}>{i.name}</option>)}
                     </select>
                   </div>
 
@@ -3370,7 +3406,7 @@ if (screen==="newpassword") return (
                 </div>
                 <div style={{ padding:"16px 28px", borderTop:"1px solid #f3f4f6", display:"flex", gap:10, justifyContent:"flex-end" }}>
                   <button onClick={()=>setShowCreateAssignment(false)} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-                  <button onClick={async()=>{ if(!newAssignment.vessel||!newAssignment.inspector)return; try{ const vessel=vessels.find(v=>v.name===newAssignment.vessel); const r=await fetch(`${API}/api/admin/assignments`,{method:"POST",headers:authHeader(),body:JSON.stringify({vessel_id:vessel?.id,template_version_id:newAssignment.templateVersion,inspector_id:JSON.parse(localStorage.getItem("user")||"{}").id,due_date:newAssignment.dueDate||null,notes:newAssignment.notes||null})}); const d=await r.json(); if(d.success){setAssignments(prev=>[...prev,{id:d.data.id,...newAssignment}]);setShowCreateAssignment(false);} }catch(e){alert("Error");} }}
+                  <button onClick={async()=>{ if(!newAssignment.vessel||!newAssignment.inspector)return; try{ const vessel=vessels.find(v=>v.name===newAssignment.vessel); const inspObj=inspectors.find(i=>i.name===newAssignment.inspector||i.email===newAssignment.inspector); const tmplObj=templates.find(t=>t.name===newAssignment.templateVersion); const r=await fetch(`${API}/api/admin/assignments`,{method:"POST",headers:authHeader(),body:JSON.stringify({vessel_id:vessel?.id,template_id:tmplObj?.id,inspector_id:inspObj?.id,due_date:newAssignment.dueDate?newAssignment.dueDate+"T00:00:00":null,notes:newAssignment.notes||null})}); const d=await r.json(); if(d.success){ const rl=await fetch(`${API}/api/admin/assignments`,{headers:authHeader()}); const dl=await rl.json(); if(dl.success)setAssignments(dl.data); setShowCreateAssignment(false); setNewAssignment({vessel:"",templateVersion:"",inspector:"",dueDate:"",notes:""});} }catch(e){alert("Error creating assignment");} }}
                     style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Create Assignment</button>
                 </div>
               </div>
@@ -3454,7 +3490,16 @@ if (screen==="newpassword") return (
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
                 <thead><tr style={{ borderBottom:"1px solid #f3f4f6" }}>{["VESSEL","INSPECTOR","TEMPLATE","DATE","STATUS"].map(h=><th key={h} style={{ textAlign:"left", padding:"12px 16px", color:"#6b7280", fontWeight:700, fontSize:11, letterSpacing:"0.05em" }}>{h}</th>)}</tr></thead>
                 <tbody>
-                  <tr><td colSpan={5}><EmptyState msg="No reports generated yet."/></td></tr>
+                  {approvedReports.length===0?<tr><td colSpan={5}><EmptyState msg="No reports generated yet. Reports appear here after inspector submissions are reviewed and approved."/></td></tr>
+                    :approvedReports.map(r=>(
+                    <tr key={r.id} style={{ borderBottom:"1px solid #f9fafb" }} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
+                      <td style={{ padding:"14px 16px", fontWeight:600, color:"#111" }}>{r.vessel||"—"}</td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>{r.inspector||"—"}</td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>—</td>
+                      <td style={{ padding:"14px 16px", color:"#374151", whiteSpace:"nowrap" }}>{r.created_at?new Date(r.created_at).toLocaleDateString("en-GB"):"—"}</td>
+                      <td style={{ padding:"14px 16px" }}><span style={{ background:"#dcfce7", color:"#166534", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{r.status}</span></td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -3593,7 +3638,7 @@ if (screen==="newpassword") return (
                             <div style={{ position:"absolute", right:8, top:44, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 28px rgba(0,0,0,0.15)", zIndex:999, minWidth:140, overflow:"hidden" }} onClick={e=>e.stopPropagation()}>
                               <div style={{ padding:"11px 16px", fontSize:14, color:"#111", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Edit</div>
                               <div style={{ height:1, background:"#fee2e2", margin:"2px 0" }}/>
-                              <div onClick={()=>{ setScoringProfiles(prev=>prev.filter(x=>x.id!==p.id)); setScoringMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                              <div onClick={()=>{ fetch(`${API}/api/admin/profiles/${p.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); setScoringProfiles(prev=>prev.filter(x=>x.id!==p.id)); setScoringMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
                             </div>
                           )}
                         </td>
@@ -3759,7 +3804,7 @@ if (screen==="newpassword") return (
                     {scoringStep>1&&<button onClick={()=>setScoringStep(scoringStep-1)} style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 20px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>‹ Back</button>}
                     {scoringStep<4
                       ?<button onClick={()=>setScoringStep(scoringStep+1)} style={{ padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Next ›</button>
-                      :<button onClick={()=>{ if(!newScoringProfile.name)return; setScoringProfiles(prev=>[...prev,{id:Date.now(),name:newScoringProfile.name,method:"Weighted %",passThreshold:newScoringProfile.passThreshold,conditional:newScoringProfile.conditional,usedBy:0}]); setShowAddScoringProfile(false); }} style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>
+                      :<button onClick={async()=>{ if(!newScoringProfile.name)return; try{ const r=await fetch(`${API}/api/admin/profiles`,{method:"POST",headers:authHeader(),body:JSON.stringify({kind:"scoring",name:newScoringProfile.name,data:{method:"Weighted %",passThreshold:newScoringProfile.passThreshold,conditional:newScoringProfile.conditional,usedBy:0}})}); const d=await r.json(); if(d.success){ setScoringProfiles(prev=>[...prev,{id:d.data.id,name:newScoringProfile.name,method:"Weighted %",passThreshold:newScoringProfile.passThreshold,conditional:newScoringProfile.conditional,usedBy:0}]); setShowAddScoringProfile(false);} }catch(e){alert("Error");} }} style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                         Save Profile
                       </button>
@@ -3849,7 +3894,7 @@ if (screen==="newpassword") return (
                             <div style={{ position:"absolute", right:8, top:44, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 28px rgba(0,0,0,0.15)", zIndex:999, minWidth:140, overflow:"hidden" }} onClick={e=>e.stopPropagation()}>
                               <div style={{ padding:"11px 16px", fontSize:14, color:"#111", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Edit</div>
                               <div style={{ height:1, background:"#fee2e2", margin:"2px 0" }}/>
-                              <div onClick={()=>{ setAiProfiles(prev=>prev.filter(x=>x.id!==p.id)); setAiMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                              <div onClick={()=>{ fetch(`${API}/api/admin/profiles/${p.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); setAiProfiles(prev=>prev.filter(x=>x.id!==p.id)); setAiMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
                             </div>
                           )}
                         </td>
@@ -4024,7 +4069,7 @@ if (screen==="newpassword") return (
                     {aiStep>1&&<button onClick={()=>setAiStep(aiStep-1)} style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 20px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>‹ Back</button>}
                     {aiStep<5
                       ?<button onClick={()=>setAiStep(aiStep+1)} style={{ padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Next ›</button>
-                      :<button onClick={()=>{ if(!newAI.name)return; setAiProfiles(prev=>[...prev,{id:Date.now(),name:newAI.name,visionModel:newAI.visionModel,reviewWhenBelow:newAI.reviewWhenBelow,usedBy:0}]); setShowAddAI(false); }} style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>
+                      :<button onClick={async()=>{ if(!newAI.name)return; try{ const r=await fetch(`${API}/api/admin/profiles`,{method:"POST",headers:authHeader(),body:JSON.stringify({kind:"ai",name:newAI.name,data:{visionModel:newAI.visionModel,reviewWhenBelow:newAI.reviewWhenBelow,usedBy:0}})}); const d=await r.json(); if(d.success){ setAiProfiles(prev=>[...prev,{id:d.data.id,name:newAI.name,visionModel:newAI.visionModel,reviewWhenBelow:newAI.reviewWhenBelow,usedBy:0}]); setShowAddAI(false);} }catch(e){alert("Error");} }} style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                         Save Profile
                       </button>
@@ -4115,7 +4160,7 @@ if (screen==="newpassword") return (
                             <div style={{ position:"absolute", right:8, top:44, background:"#fff", border:"1px solid #e5e7eb", borderRadius:10, boxShadow:"0 8px 28px rgba(0,0,0,0.15)", zIndex:999, minWidth:140, overflow:"hidden" }} onClick={e=>e.stopPropagation()}>
                               <div style={{ padding:"11px 16px", fontSize:14, color:"#111", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#f9fafb"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Edit</div>
                               <div style={{ height:1, background:"#fee2e2", margin:"2px 0" }}/>
-                              <div onClick={()=>{ setReportProfiles(prev=>prev.filter(x=>x.id!==p.id)); setReportMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
+                              <div onClick={()=>{ fetch(`${API}/api/admin/profiles/${p.id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); setReportProfiles(prev=>prev.filter(x=>x.id!==p.id)); setReportMenuOpen(null); }} style={{ padding:"11px 16px", fontSize:14, color:"#ef4444", cursor:"pointer" }} onMouseOver={e=>e.currentTarget.style.background="#fef2f2"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>Delete</div>
                             </div>
                           )}
                         </td>
@@ -4293,7 +4338,7 @@ if (screen==="newpassword") return (
                     {reportStep>1&&<button onClick={()=>setReportStep(reportStep-1)} style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 20px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>‹ Back</button>}
                     {reportStep<5
                       ?<button onClick={()=>setReportStep(reportStep+1)} style={{ padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Next ›</button>
-                      :<button onClick={()=>{ if(!newReport.name)return; setReportProfiles(prev=>[...prev,{id:Date.now(),name:newReport.name,sections:newReport.sections,branding:newReport.branding||null,usedBy:0}]); setShowAddReport(false); }} style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>
+                      :<button onClick={async()=>{ if(!newReport.name)return; try{ const r=await fetch(`${API}/api/admin/profiles`,{method:"POST",headers:authHeader(),body:JSON.stringify({kind:"report",name:newReport.name,data:{sections:newReport.sections,branding:newReport.branding||null,usedBy:0}})}); const d=await r.json(); if(d.success){ setReportProfiles(prev=>[...prev,{id:d.data.id,name:newReport.name,sections:newReport.sections,branding:newReport.branding||null,usedBy:0}]); setShowAddReport(false);} }catch(e){alert("Error");} }} style={{ display:"flex", alignItems:"center", gap:7, padding:"9px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                         Save Profile
                       </button>
@@ -4386,20 +4431,25 @@ if (screen==="newpassword") return (
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
                 <thead><tr style={{ borderBottom:"1px solid #f3f4f6" }}>{["VESSEL","FLEET","INSPECTOR","TEMPLATE","DATE","STATUS"].map(h=><th key={h} style={{ textAlign:"left", padding:"12px 16px", color:"#6b7280", fontWeight:700, fontSize:11, letterSpacing:"0.05em" }}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {sessions.filter(s=>{
-                    const matchSearch=!sessionSearch||s.vessel.toLowerCase().includes(sessionSearch.toLowerCase())||s.template.toLowerCase().includes(sessionSearch.toLowerCase());
+                  {sessionsList.filter(s=>{
+                    const matchSearch=!sessionSearch||(s.vessel||"").toLowerCase().includes(sessionSearch.toLowerCase());
                     const matchStatus=sessionStatusFilter==="All statuses"||s.status===sessionStatusFilter;
                     const matchInspector=sessionInspectorFilter==="All inspectors"||s.inspector===sessionInspectorFilter;
-                    const matchFleet=sessionFleetFilter==="All fleets"||s.fleet===sessionFleetFilter;
-                    const matchVessel=sessionVesselFilter==="All vessels"||s.vessel===sessionVesselFilter;
-                    return matchSearch&&matchStatus&&matchInspector&&matchFleet&&matchVessel;
+                    return matchSearch&&matchStatus&&matchInspector;
+                  }).length===0
+                    ?<tr><td colSpan={6}><EmptyState msg="No active sessions. Sessions appear when inspectors start inspections."/></td></tr>
+                    :sessionsList.filter(s=>{
+                    const matchSearch=!sessionSearch||(s.vessel||"").toLowerCase().includes(sessionSearch.toLowerCase());
+                    const matchStatus=sessionStatusFilter==="All statuses"||s.status===sessionStatusFilter;
+                    const matchInspector=sessionInspectorFilter==="All inspectors"||s.inspector===sessionInspectorFilter;
+                    return matchSearch&&matchStatus&&matchInspector;
                   }).map(s=>(
                     <tr key={s.id} style={{ borderBottom:"1px solid #f9fafb", cursor:"pointer" }} onClick={()=>{ setSelectedSession(s); setSessionTab("Overview"); }} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
-                      <td style={{ padding:"14px 16px" }}><span style={{ fontWeight:600, color:"#111" }}>{s.vessel}</span>{s.imo&&<span style={{ fontSize:12, color:"#9ca3af", marginLeft:6 }}>{s.imo}</span>}</td>
-                      <td style={{ padding:"14px 16px", color:"#374151" }}>{s.fleet||"—"}</td>
-                      <td style={{ padding:"14px 16px", color:"#374151" }}>{s.inspector}</td>
-                      <td style={{ padding:"14px 16px", color:"#374151" }}>{s.template}</td>
-                      <td style={{ padding:"14px 16px", color:"#374151", whiteSpace:"nowrap" }}>{s.date}</td>
+                      <td style={{ padding:"14px 16px" }}><span style={{ fontWeight:600, color:"#111" }}>{s.vessel||"—"}</span></td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>—</td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>{s.inspector||"—"}</td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>—</td>
+                      <td style={{ padding:"14px 16px", color:"#374151", whiteSpace:"nowrap" }}>{s.started_at?new Date(s.started_at).toLocaleDateString("en-GB"):"—"}</td>
                       <td style={{ padding:"14px 16px" }}><span style={{ background:"#f3f4f6", color:"#374151", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{s.status}</span></td>
                     </tr>
                   ))}
@@ -4523,17 +4573,19 @@ if (screen==="newpassword") return (
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
                 <thead><tr style={{ borderBottom:"1px solid #f3f4f6" }}>{["SESSION","VESSEL","INSPECTOR","SUBMITTED","AI FLAGS","STATUS",""].map(h=><th key={h} style={{ textAlign:"left", padding:"12px 16px", color:"#6b7280", fontWeight:700, fontSize:11, letterSpacing:"0.05em" }}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {reviewQueue.length===0
-                    ?<tr><td colSpan={7}><EmptyState msg="No sessions pending review."/></td></tr>
-                    :reviewQueue.map(r=>(
+                  {reviewReports.length===0
+                    ?<tr><td colSpan={7}><EmptyState msg="No sessions pending review. When inspectors submit inspections, they'll appear here for approval."/></td></tr>
+                    :reviewReports.map(r=>(
                       <tr key={r.id} style={{ borderBottom:"1px solid #f9fafb", cursor:"pointer" }} onClick={()=>setSelectedReview(r)} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
-                        <td style={{ padding:"14px 16px", fontWeight:600, color:"#111" }}>Session #{r.id}</td>
-                        <td style={{ padding:"14px 16px" }}><span style={{ fontWeight:500, color:"#111" }}>{r.vessel}</span>{r.imo&&<span style={{ fontSize:12, color:"#9ca3af", marginLeft:6 }}>{r.imo}</span>}</td>
-                        <td style={{ padding:"14px 16px", color:"#374151" }}>{r.inspector}</td>
-                        <td style={{ padding:"14px 16px", color:"#374151" }}>{r.submitted||"—"}</td>
-                        <td style={{ padding:"14px 16px" }}><span style={{ background:"#fef2f2", color:"#ef4444", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{r.aiFlags||0} flags</span></td>
-                        <td style={{ padding:"14px 16px" }}><span style={{ background:"#f3f4f6", color:"#374151", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{r.status}</span></td>
-                        <td style={{ padding:"14px 16px", textAlign:"right" }}><button style={{ background:P, color:"#fff", border:"none", borderRadius:7, cursor:"pointer", fontSize:13, fontWeight:600, padding:"6px 14px", fontFamily:"inherit" }}>Review</button></td>
+                        <td style={{ padding:"14px 16px", fontWeight:600, color:"#111" }}>Report #{r.id}</td>
+                        <td style={{ padding:"14px 16px" }}><span style={{ fontWeight:500, color:"#111" }}>{r.vessel||"—"}</span></td>
+                        <td style={{ padding:"14px 16px", color:"#374151" }}>{r.inspector||"—"}</td>
+                        <td style={{ padding:"14px 16px", color:"#374151" }}>{r.created_at?new Date(r.created_at).toLocaleDateString("en-GB"):"—"}</td>
+                        <td style={{ padding:"14px 16px" }}><span style={{ background:"#fef2f2", color:"#ef4444", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{r.findings_count||0} findings</span></td>
+                        <td style={{ padding:"14px 16px" }}><span style={{ background:"#fef3c7", color:"#92400e", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{r.status}</span></td>
+                        <td style={{ padding:"14px 16px", textAlign:"right" }}>
+                          <button onClick={async e=>{ e.stopPropagation(); if(!confirm("Approve this report?"))return; try{ await fetch(`${API}/api/admin/reports/${r.id}/review`,{method:"PATCH",headers:authHeader(),body:JSON.stringify({status:"approved"})}); setReviewReports(prev=>prev.filter(x=>x.id!==r.id)); setApprovedReports(prev=>[...prev,{...r,status:"approved"}]); }catch(err){alert("Error");} }} style={{ background:P, color:"#fff", border:"none", borderRadius:7, cursor:"pointer", fontSize:13, fontWeight:600, padding:"6px 14px", fontFamily:"inherit" }}>Approve</button>
+                        </td>
                       </tr>
                     ))}
                 </tbody>
@@ -4678,31 +4730,32 @@ if (screen==="newpassword") return (
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
                 <thead><tr style={{ borderBottom:"1px solid #f3f4f6" }}>{["TITLE","VESSEL","FLEET","SEVERITY","STATUS","DUE DATE","SESSION","ASSIGNEE",""].map(h=><th key={h} style={{ textAlign:"left", padding:"12px 14px", color:"#6b7280", fontWeight:700, fontSize:11, letterSpacing:"0.05em" }}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {capaActions.filter(a=>{
-                    const ms=!capaSearch||a.title.toLowerCase().includes(capaSearch.toLowerCase());
-                    const mst=capaStatusFilter==="All statuses"||a.status===capaStatusFilter;
-                    const msev=capaSeverityFilter==="All"||a.severity===capaSeverityFilter;
-                    return ms&&mst&&msev;
-                  }).length===0
-                    ?<tr><td colSpan={9}><EmptyState msg="No CAPA actions yet. Click Create action to add one."/></td></tr>
-                    :capaActions.filter(a=>{ const ms=!capaSearch||a.title.toLowerCase().includes(capaSearch.toLowerCase()); const mst=capaStatusFilter==="All statuses"||a.status===capaStatusFilter; return ms&&mst; }).map(a=>(
+                  {capaList.filter(a=>{ const ms=!capaSearch||(a.finding||"").toLowerCase().includes(capaSearch.toLowerCase()); const mst=capaStatusFilter==="All statuses"||a.status===capaStatusFilter; return ms&&mst; }).length===0
+                    ?<tr><td colSpan={9}><EmptyState msg="No CAPA actions yet. CAPAs auto-create from inspection findings, or add manually."/></td></tr>
+                    :capaList.filter(a=>{ const ms=!capaSearch||(a.finding||"").toLowerCase().includes(capaSearch.toLowerCase()); const mst=capaStatusFilter==="All statuses"||a.status===capaStatusFilter; return ms&&mst; }).map(a=>(
                       <tr key={a.id} style={{ borderBottom:"1px solid #f9fafb" }} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
-                        <td style={{ padding:"13px 14px", fontWeight:600, color:"#111" }}>{a.title}</td>
-                        <td style={{ padding:"13px 14px", color:"#374151" }}>{a.vessel||"—"}</td>
-                        <td style={{ padding:"13px 14px", color:"#374151" }}>{a.fleet||"—"}</td>
+                        <td style={{ padding:"13px 14px", fontWeight:600, color:"#111" }}>{a.finding||a.question_text||"—"}</td>
+                        <td style={{ padding:"13px 14px", color:"#374151" }}>—</td>
+                        <td style={{ padding:"13px 14px", color:"#374151" }}>—</td>
                         <td style={{ padding:"13px 14px" }}>
-                          <span style={{ background:a.severity==="Critical"?"#fef2f2":a.severity==="Major"?"#fff7ed":"#f3f4f6", color:a.severity==="Critical"?"#ef4444":a.severity==="Major"?"#f97316":"#374151", borderRadius:20, padding:"3px 10px", fontSize:12, fontWeight:600, border:a.severity==="Critical"?"1px solid #fecaca":a.severity==="Major"?"1px solid #fed7aa":"1px solid #e5e7eb" }}>{a.severity}</span>
+                          <span style={{ background:"#f3f4f6", color:"#374151", borderRadius:20, padding:"3px 10px", fontSize:12, fontWeight:600, border:"1px solid #e5e7eb" }}>—</span>
                         </td>
-                        <td style={{ padding:"13px 14px" }}><span style={{ background:a.status==="Verified"?P:"#f3f4f6", color:a.status==="Verified"?"#fff":"#374151", borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:600 }}>{a.status}</span></td>
-                        <td style={{ padding:"13px 14px", color:"#374151" }}>{a.dueDate||"—"}</td>
-                        <td style={{ padding:"13px 14px", color:P, fontSize:13 }}>{a.session?`#${a.session} ↗`:"—"}</td>
-                        <td style={{ padding:"13px 14px", color:"#374151" }}>{a.assignee||"—"}</td>
-                        <td style={{ padding:"13px 14px", textAlign:"right" }}><button style={{ background:"none", border:"1px solid #e5e7eb", borderRadius:7, cursor:"pointer", color:"#6b7280", fontSize:14, fontWeight:700, letterSpacing:"2px", padding:"3px 8px" }}>•••</button></td>
+                        <td style={{ padding:"13px 14px" }}><span style={{ background:a.status==="closed"?"#dcfce7":a.status==="in_progress"?"#fef3c7":"#fef2f2", color:a.status==="closed"?"#166534":a.status==="in_progress"?"#92400e":"#991b1b", borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:600 }}>{a.status}</span></td>
+                        <td style={{ padding:"13px 14px", color:"#374151" }}>{a.due_date?new Date(a.due_date).toLocaleDateString("en-GB"):"—"}</td>
+                        <td style={{ padding:"13px 14px", color:P, fontSize:13 }}>—</td>
+                        <td style={{ padding:"13px 14px", color:"#374151" }}>—</td>
+                        <td style={{ padding:"13px 14px", textAlign:"right" }}>
+                          <select value={a.status} onChange={async e=>{ const newStatus=e.target.value; try{ await fetch(`${API}/api/admin/capas/${a.id}`,{method:"PATCH",headers:authHeader(),body:JSON.stringify({status:newStatus})}); setCapaList(prev=>prev.map(x=>x.id===a.id?{...x,status:newStatus}:x)); }catch(e2){alert("Error");} }} style={{ padding:"5px 10px", fontSize:12, border:"1px solid #e5e7eb", borderRadius:6, background:"#fff", cursor:"pointer" }}>
+                            <option value="open">Open</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="closed">Closed</option>
+                          </select>
+                        </td>
                       </tr>
                     ))}
                 </tbody>
               </table>
-              {capaActions.length>0&&<div style={{ padding:"10px 16px", fontSize:13, color:"#6b7280", borderTop:"1px solid #f3f4f6" }}>Showing 1–{Math.min(capaPerPage,capaActions.length)} of {capaActions.length}</div>}
+              {capaList.length>0&&<div style={{ padding:"10px 16px", fontSize:13, color:"#6b7280", borderTop:"1px solid #f3f4f6" }}>Showing 1–{Math.min(capaPerPage,capaList.length)} of {capaList.length}</div>}
             </div>
           </div>
 
@@ -4937,8 +4990,8 @@ if (screen==="newpassword") return (
                 <p style={{ fontSize:15, fontWeight:700, color:"#111", marginBottom:16 }}>Findings by Severity</p>
                 <div style={{ display:"flex", alignItems:"flex-end", gap:20, height:100, padding:"0 10px" }}>
                   {["critical","major","minor","info"].map(s=>{
-                    const count=capaActions.filter(a=>a.severity?.toLowerCase()===s).length;
-                    const max=Math.max(1,...["critical","major","minor","info"].map(x=>capaActions.filter(a=>a.severity?.toLowerCase()===x).length));
+                    const count=capaList.filter(a=>a.severity?.toLowerCase()===s).length;
+                    const max=Math.max(1,...["critical","major","minor","info"].map(x=>capaList.filter(a=>a.severity?.toLowerCase()===x).length));
                     return(
                       <div key={s} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
                         <div style={{ width:"100%", background:count>0?P:"#e5e7eb", height:`${Math.max(8,(count/max)*80)}px`, borderRadius:"4px 4px 0 0" }}/>
@@ -4974,7 +5027,7 @@ if (screen==="newpassword") return (
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
               <div style={{ background:"#fff", borderRadius:12, padding:"22px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
                 <p style={{ fontSize:15, fontWeight:700, color:"#111", marginBottom:16 }}>CAPA Status</p>
-                {[["Verified",capaActions.filter(a=>a.status==="Verified").length],["Open",capaActions.filter(a=>a.status==="Open").length],["In Progress",capaActions.filter(a=>a.status==="In Progress").length]].map(([label,count])=>(
+                {[["Verified",capaList.filter(a=>a.status==="Verified").length],["Open",capaList.filter(a=>a.status==="Open").length],["In Progress",capaList.filter(a=>a.status==="In Progress").length]].map(([label,count])=>(
                   <div key={label} style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderTop:"1px solid #f3f4f6" }}>
                     <span style={{ fontSize:14, color:"#374151" }}>{label}</span>
                     <span style={{ fontSize:14, fontWeight:700, color:"#111" }}>{count}</span>
@@ -5184,7 +5237,14 @@ if (screen==="newpassword") return (
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:14 }}>
                 <thead><tr style={{ borderBottom:"1px solid #f3f4f6" }}>{["DATE","ACTOR","ENTITY","ACTION"].map(h=><th key={h} style={{ textAlign:"left", padding:"12px 16px", color:"#6b7280", fontWeight:700, fontSize:11, letterSpacing:"0.05em" }}>{h}</th>)}</tr></thead>
                 <tbody>
-                  <tr><td colSpan={4}><EmptyState msg="No audit log entries yet."/></td></tr>
+                  {auditLog.length===0?<tr><td colSpan={4}><EmptyState msg="No audit log entries yet."/></td></tr>:auditLog.map(entry=>(
+                    <tr key={entry.id} style={{ borderBottom:"1px solid #f9fafb" }}>
+                      <td style={{ padding:"12px 16px", color:"#6b7280", fontSize:13, whiteSpace:"nowrap" }}>{entry.created_at?new Date(entry.created_at).toLocaleString("en-GB"):"—"}</td>
+                      <td style={{ padding:"12px 16px", color:"#111", fontWeight:600 }}>{entry.user_name||"—"}</td>
+                      <td style={{ padding:"12px 16px", color:"#374151" }}>{entry.entity||"—"}</td>
+                      <td style={{ padding:"12px 16px", color:"#374151" }}>{entry.action}{entry.details?` (${entry.details})`:""}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
