@@ -262,6 +262,7 @@ export default function App() {
   // Analytics state
   const [showHowToAnalytics, setShowHowToAnalytics] = useState(false);
   const [analyticsRange, setAnalyticsRange] = useState("Last 30 days");
+  const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsDateFrom, setAnalyticsDateFrom] = useState("26-02-2026");
   const [analyticsDateTo, setAnalyticsDateTo] = useState("28-03-2026");
   const [topVesselsMetric, setTopVesselsMetric] = useState("Findings");
@@ -384,6 +385,22 @@ export default function App() {
     // Sessions
     fetch(`${API}/api/admin/sessions`,{headers:hdr}).then(r=>r.json()).then(d=>{
       if(d.success) setSessionsList(d.data);
+    }).catch(()=>{});
+    fetch(`${API}/api/settings/general`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success && d.data){
+        if(d.data.org) setSettingsOrg(d.data.org);
+        if(d.data.defaultProfiles) setSettingsDefaultProfiles(d.data.defaultProfiles);
+        if(d.data.notifications) setSettingsNotifications(d.data.notifications);
+      }
+    }).catch(()=>{});
+    fetch(`${API}/api/analytics`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success) setAnalyticsData(d.data);
+    }).catch(()=>{});
+    fetch(`${API}/api/settings/theme`,{headers:hdr}).then(r=>r.json()).then(d=>{
+      if(d.success && d.data){
+        if(d.data.palette) setSelectedPalette(d.data.palette);
+        if(d.data.font) setSelectedFont(d.data.font);
+      }
     }).catch(()=>{});
     // Admins (current user)
     const me = JSON.parse(localStorage.getItem("user")||"{}");
@@ -3082,11 +3099,16 @@ export default function App() {
             </div>
 
             {/* Save */}
-            <button style={{ background:P, color:"#fff", border:"none", borderRadius:8, padding:"12px 28px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Save Settings</button>
-          </div>
+            <button onClick={()=>{
+              fetch(`${API}/api/settings/general`,{method:"PUT",headers:authHeader(),body:JSON.stringify({org:settingsOrg,defaultProfiles:settingsDefaultProfiles,notifications:settingsNotifications})}).then(r=>r.json()).then(d=>{
+                if(d.success) alert("Settings saved successfully!");
+                else alert("Failed to save settings");
+              }).catch(()=>alert("Error saving settings"));
+            }} style={{ background:P, color:"#fff", border:"none", borderRadius:8, padding:"12px 28px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Save Settings</button>  
+              </div>
         </div>
       )}
-
+      
       {/* USERS */}
       {activePage==="users"&&(
         <div style={{ marginLeft:240, minHeight:"100vh", background:"#f0f2f5", fontFamily:selectedFont+",'Segoe UI',sans-serif" }} onClick={()=>{ setUserMenuOpen(false); setUsersMenuOpen(null); }}>
@@ -4872,11 +4894,11 @@ export default function App() {
                       <span style={{ fontSize:14, color:"#111" }}>{name}</span>
                     </div>
                     <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-                      <button style={{ display:"flex", alignItems:"center", gap:5, background:"none", border:"none", cursor:"pointer", fontSize:13, color:"#374151", fontFamily:"inherit", fontWeight:500 }}>
+                      <button onClick={()=>alert(`Preview: ${name}\n\nThis email uses the Ship Inspector layout with logo, card body, and footer. Configure your email service (SendGrid/SMTP) to send these.`)} style={{ display:"flex", alignItems:"center", gap:5, background:"none", border:"none", cursor:"pointer", fontSize:13, color:"#374151", fontFamily:"inherit", fontWeight:500 }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         Preview
                       </button>
-                      <button style={{ display:"flex", alignItems:"center", gap:5, background:"none", border:"none", cursor:"pointer", fontSize:13, color:"#374151", fontFamily:"inherit", fontWeight:500 }}>
+                      <button onClick={()=>alert(`Edit: ${name}\n\nEmail editing requires an email service integration (SendGrid/SMTP). This is a planned feature.`)} style={{ display:"flex", alignItems:"center", gap:5, background:"none", border:"none", cursor:"pointer", fontSize:13, color:"#374151", fontFamily:"inherit", fontWeight:500 }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                         Edit
                       </button>
@@ -4945,10 +4967,10 @@ export default function App() {
             {/* KPI Cards */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:16, marginBottom:20 }}>
               {[
-                { title:"Completed", icon:"⊙", value:sessions.filter(s=>s.status==="report_ready"||s.status==="closed").length, sub:"Reports ready" },
-                { title:"Outcome", icon:"⚠", value:null, pass:sessions.filter(s=>s.status==="report_ready").length, cond:0, fail:0 },
-                { title:"Avg Turnaround", icon:"⏱", value:"5m", sub:"Submit to report ready" },
-                { title:"Review / CAPA", icon:"📋", value:null, reviewQ:reviewQueue.length, overdueCapa:0 },
+                { title:"Total Vessels", icon:"🚢", value:analyticsData?.totals?.vessels ?? 0, sub:"In fleet" },
+                { title:"Assignments", icon:"📋", value:analyticsData?.totals?.assignments ?? 0, sub:"Total created" },
+                { title:"Reports", icon:"📄", value:analyticsData?.totals?.reports ?? 0, sub:"Generated" },
+                { title:"Open CAPAs", icon:"⚠", value:analyticsData?.capa_by_status?.open ?? 0, sub:"Need action" },
               ].map((k,i)=>(
                 <div key={i} style={{ background:"#fff", borderRadius:12, padding:"20px 22px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
@@ -5216,6 +5238,12 @@ export default function App() {
                   </div>
                   <input type="range" min="0.5" max="3" step="0.25" value={brandTextSize} onChange={e=>setBrandTextSize(Number(e.target.value))} style={{ width:"100%", accentColor:P, cursor:"pointer" }}/>
                 </div>
+            <button onClick={()=>{
+              fetch(`${API}/api/settings/theme`,{method:"PUT",headers:authHeader(),body:JSON.stringify({palette:selectedPalette,font:selectedFont})}).then(r=>r.json()).then(d=>{
+                if(d.success) alert("Theme saved successfully!");
+                else alert("Failed to save theme");
+              }).catch(()=>alert("Error saving theme"));
+            }} style={{ marginTop:20, background:P, color:"#fff", border:"none", borderRadius:8, padding:"12px 28px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Save Theme</button>
               </div>
             </div>
           </div>
