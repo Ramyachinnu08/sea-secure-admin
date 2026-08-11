@@ -24,6 +24,19 @@ const PARTICLES = Array.from({ length: 28 }, (_, i) => ({
   opacity: Math.random() * 0.5 + 0.15,
 }));
 
+function ModalOverlay({ title, subtitle, children, onClose, maxWidth=480 }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:"28px 32px", width:"100%", maxWidth, boxShadow:"0 20px 60px rgba(0,0,0,0.3)", position:"relative", maxHeight:"90vh", overflowY:"auto" }}>
+        <button onClick={onClose} style={{ position:"absolute", top:16, right:16, background:"none", border:"none", fontSize:18, cursor:"pointer", color:"#6b7280" }}>✕</button>
+        <h3 style={{ fontSize:18, fontWeight:800, color:"#111", marginBottom:6 }}>{title}</h3>
+        {subtitle&&<p style={{ fontSize:14, color:"#6b7280", marginBottom:20 }}>{subtitle}</p>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const getInitialScreen = () => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -83,10 +96,13 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [totpEnabled, setTotpEnabled] = useState(false);
   const [verifyInput, setVerifyInput] = useState("");
+  const [totpSecret, setTotpSecret] = useState("");
+  const [totpUri, setTotpUri] = useState("");
   const [currentPw, setCurrentPw] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [passkeyName, setPasskeyName] = useState("");
+  const [passkeys, setPasskeys] = useState([]);
   const [showCurrPw, setShowCurrPw] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
@@ -239,6 +255,7 @@ export default function App() {
   const [showHowToSessions, setShowHowToSessions] = useState(false);
   const [selectedSession, setSelectedSession] = useState(null);
   const [sessionTab, setSessionTab] = useState("Overview");
+  const [sessionDetail, setSessionDetail] = useState(null);
 
   // Review Queue state
   const [reviewQueue, setReviewQueue] = useState([]);
@@ -528,17 +545,6 @@ export default function App() {
     <div style={{ background:"rgba(255,255,255,0.96)", borderRadius:20, padding:"34px 38px", width:"100%", maxWidth, boxShadow:"0 32px 80px rgba(0,0,0,0.45)", backdropFilter:"blur(16px)", border:"1px solid rgba(255,255,255,0.18)" }}>{children}</div>
   );
 
-  const ModalOverlay = ({ title, subtitle, children, onClose, maxWidth=480 }) => (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
-      <div style={{ background:"#fff", borderRadius:16, padding:"28px 32px", width:"100%", maxWidth, boxShadow:"0 20px 60px rgba(0,0,0,0.3)", position:"relative", maxHeight:"90vh", overflowY:"auto" }}>
-        <button onClick={onClose} style={{ position:"absolute", top:16, right:16, background:"none", border:"none", fontSize:18, cursor:"pointer", color:"#6b7280" }}>✕</button>
-        <h3 style={{ fontSize:18, fontWeight:800, color:"#111", marginBottom:6 }}>{title}</h3>
-        {subtitle&&<p style={{ fontSize:14, color:"#6b7280", marginBottom:20 }}>{subtitle}</p>}
-        {children}
-      </div>
-    </div>
-  );
-
   const inputStyle = { width:"100%", padding:"10px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, color:"#111", fontFamily:"inherit", outline:"none", boxSizing:"border-box" };
   const selectStyle = { ...inputStyle, cursor:"pointer", appearance:"none", backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E\")", backgroundRepeat:"no-repeat", backgroundPosition:"right 14px center", paddingRight:36 };
   const inputStyle2 = inputStyle;
@@ -768,23 +774,38 @@ export default function App() {
         </div>
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
           <button onClick={()=>setModal(null)} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-          <button onClick={()=>setModal(null)} style={{ padding:"10px 22px", background:"#9ca3af", border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Update password</button>
+          <button onClick={()=>{
+            if(!currentPw||!newPassword){alert("Please fill in all fields");return;}
+            if(newPassword!==confirmPw){alert("New passwords do not match");return;}
+            if(newPassword.length<6){alert("New password must be at least 6 characters");return;}
+            fetch(`${API}/auth/change-password`,{method:"POST",headers:authHeader(),body:JSON.stringify({old_password:currentPw,new_password:newPassword})}).then(r=>r.json()).then(d=>{
+              if(d.success){alert("Password changed successfully!");setModal(null);setCurrentPw("");setNewPassword("");setConfirmPw("");}
+              else{alert(d.message||"Failed to change password");}
+            }).catch(()=>alert("Error changing password"));
+          }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Update password</button>
         </div>
       </ModalOverlay>
     );
     if (modal==="setup2fa") return (
       <ModalOverlay title="Set up two-factor authentication" subtitle="Generate a QR code to scan with your authenticator app." onClose={()=>setModal(null)}>
-        <button onClick={()=>setModal("qrcode")} style={{ width:"100%", padding:"13px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Generate QR code</button>
+        <button onClick={()=>{
+          fetch(`${API}/auth/totp/setup`,{method:"POST",headers:authHeader()}).then(r=>r.json()).then(d=>{
+            if(d.success){setTotpSecret(d.data.secret);setTotpUri(d.data.otpauth_uri);setModal("qrcode");}
+            else{alert(d.message||"TOTP setup failed. Make sure pyotp is installed on the server.");}
+          }).catch(()=>alert("Error setting up 2FA"));
+        }} style={{ width:"100%", padding:"13px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Generate QR code</button>
       </ModalOverlay>
     );
     if (modal==="qrcode") return (
       <ModalOverlay title="Set up two-factor authentication" subtitle="Scan the QR code, then enter the 6-digit code." onClose={()=>setModal(null)} maxWidth={520}>
         <div style={{ textAlign:"center", marginBottom:16 }}>
-          <div style={{ width:180, height:180, margin:"0 auto 16px", background:"#000", borderRadius:4, display:"grid", gridTemplateColumns:"repeat(18,1fr)", gap:1, padding:8, overflow:"hidden" }}>
-            {Array.from({length:324}).map((_,i)=><div key={i} style={{ background:Math.random()>0.5?"#000":"#fff", borderRadius:1 }}/>)}
+          <div style={{ width:200, height:200, margin:"0 auto 16px", background:"#fff", borderRadius:4, padding:8, display:"flex", alignItems:"center", justifyContent:"center" }}>
+            {totpUri
+              ? <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(totpUri)}`} alt="QR code" style={{ width:180, height:180 }}/>
+              : <span style={{ color:"#9ca3af", fontSize:13 }}>Generating…</span>}
           </div>
           <div style={{ fontSize:12, color:"#6b7280", marginBottom:4 }}>Or enter manually:</div>
-          <div style={{ fontSize:12, fontFamily:"monospace", color:P, fontWeight:700 }}>YUNPZG4QB4JULZ7XRDPIKRI6UTB3NUV3</div>
+          <div style={{ fontSize:12, fontFamily:"monospace", color:P, fontWeight:700, wordBreak:"break-all" }}>{totpSecret||"—"}</div>
         </div>
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
           <button onClick={()=>setModal("setup2fa")} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
@@ -800,7 +821,13 @@ export default function App() {
         </div>
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
           <button onClick={()=>setModal("qrcode")} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Back</button>
-          <button onClick={()=>{ setTotpEnabled(true); setModal("backupCodes"); }} style={{ padding:"10px 22px", background:"#9ca3af", border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Verify & enable</button>
+          <button onClick={()=>{
+            if(verifyInput.length!==6){alert("Enter the 6-digit code");return;}
+            fetch(`${API}/auth/totp/verify`,{method:"POST",headers:authHeader(),body:JSON.stringify({code:verifyInput,secret:totpSecret})}).then(r=>r.json()).then(d=>{
+              if(d.success){setTotpEnabled(true);setModal("backupCodes");setVerifyInput("");}
+              else{alert(d.message||"Invalid code");}
+            }).catch(()=>alert("Error verifying code"));
+          }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Verify & enable</button>
         </div>
       </ModalOverlay>
     );
@@ -824,7 +851,21 @@ export default function App() {
         </div>
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
           <button onClick={()=>setModal(null)} style={{ padding:"10px 22px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#111" }}>Cancel</button>
-          <button onClick={()=>setModal(null)} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Add key</button>
+          <button onClick={async()=>{
+            if(!passkeyName.trim()){alert("Please name this key");return;}
+            if(!window.PublicKeyCredential){alert("Passkeys not supported in this browser");return;}
+            try{
+              const challenge=new Uint8Array(32); window.crypto.getRandomValues(challenge);
+              const userId=new Uint8Array(16); window.crypto.getRandomValues(userId);
+              const cred=await navigator.credentials.create({publicKey:{
+                challenge, rp:{name:"InspectShip"},
+                user:{id:userId, name:"admin@inspectship.com", displayName:"Admin"},
+                pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
+                authenticatorSelection:{userVerification:"preferred"}, timeout:60000, attestation:"none"
+              }});
+              if(cred){ setPasskeys(prev=>[...prev,{id:cred.id,name:passkeyName}]); setPasskeyName(""); setModal(null); alert("Passkey registered!"); }
+            }catch(e){ alert("Passkey registration cancelled or failed: "+e.message); }
+          }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Add key</button>
         </div>
       </ModalOverlay>
     );
@@ -1239,12 +1280,21 @@ export default function App() {
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}><span>🛡</span><span style={{ fontSize:15, fontWeight:700, color:"#111" }}>Authenticator app (TOTP)</span></div>
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <span style={{ background:totpEnabled?"#dcfce7":"#f3f4f6", color:totpEnabled?"#166534":"#374151", borderRadius:20, padding:"3px 12px", fontSize:12, fontWeight:700 }}>{totpEnabled?"Enabled":"Disabled"}</span>
-              {!totpEnabled&&<button onClick={()=>setModal("setup2fa")} style={{ background:"#fff", color:"#111", border:"1.5px solid #e5e7eb", borderRadius:8, padding:"8px 18px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Enable</button>}
+              {!totpEnabled
+                ?<button onClick={()=>setModal("setup2fa")} style={{ background:"#fff", color:"#111", border:"1.5px solid #e5e7eb", borderRadius:8, padding:"8px 18px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Enable</button>
+                :<button onClick={()=>{ if(!confirm("Disable two-factor authentication?"))return; fetch(`${API}/auth/totp/disable`,{method:"POST",headers:authHeader()}).then(r=>r.json()).then(d=>{ if(d.success){setTotpEnabled(false);alert("2FA disabled");} }).catch(()=>{}); }} style={{ background:"#fff", color:"#ef4444", border:"1.5px solid #fecaca", borderRadius:8, padding:"8px 18px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Disable</button>}
             </div>
           </SectionCard>
           <SectionCard>
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16 }}><span>🔲</span><span style={{ fontSize:15, fontWeight:700, color:"#111" }}>Security keys</span></div>
-            <p style={{ fontSize:13, color:"#6b7280", marginBottom:16 }}>No security keys registered.</p>
+            {passkeys.length===0
+              ?<p style={{ fontSize:13, color:"#6b7280", marginBottom:16 }}>No security keys registered.</p>
+              :<div style={{ marginBottom:16 }}>{passkeys.map((k,i)=>(
+                <div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid #f3f4f6" }}>
+                  <span style={{ fontSize:14, color:"#111" }}>🔑 {k.name}</span>
+                  <button onClick={()=>setPasskeys(prev=>prev.filter((_,idx)=>idx!==i))} style={{ background:"none", border:"none", color:"#ef4444", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>Remove</button>
+                </div>
+              ))}</div>}
             <button onClick={()=>setModal("addPasskey")} style={{ background:"#fff", color:"#111", border:"1.5px solid #e5e7eb", borderRadius:8, padding:"8px 18px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>Add passkey or security key</button>
           </SectionCard>
         </PageShell>
@@ -3517,7 +3567,7 @@ export default function App() {
                     <tr key={r.id} style={{ borderBottom:"1px solid #f9fafb" }} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
                       <td style={{ padding:"14px 16px", fontWeight:600, color:"#111" }}>{r.vessel||"—"}</td>
                       <td style={{ padding:"14px 16px", color:"#374151" }}>{r.inspector||"—"}</td>
-                      <td style={{ padding:"14px 16px", color:"#374151" }}>—</td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>{r.template||"—"}</td>
                       <td style={{ padding:"14px 16px", color:"#374151", whiteSpace:"nowrap" }}>{r.created_at?new Date(r.created_at).toLocaleDateString("en-GB"):"—"}</td>
                       <td style={{ padding:"14px 16px" }}><span style={{ background:"#dcfce7", color:"#166534", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{r.status}</span></td>
                     </tr>
@@ -4466,11 +4516,11 @@ export default function App() {
                     const matchInspector=sessionInspectorFilter==="All inspectors"||s.inspector===sessionInspectorFilter;
                     return matchSearch&&matchStatus&&matchInspector;
                   }).map(s=>(
-                    <tr key={s.id} style={{ borderBottom:"1px solid #f9fafb", cursor:"pointer" }} onClick={()=>{ setSelectedSession(s); setSessionTab("Overview"); }} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
+                    <tr key={s.id} style={{ borderBottom:"1px solid #f9fafb", cursor:"pointer" }} onClick={()=>{ setSelectedSession(s); setSessionTab("Overview"); setSessionDetail(null); fetch(`${API}/api/admin/sessions/${s.id}/detail`,{headers:authHeader()}).then(r=>r.json()).then(d=>{ if(d.success) setSessionDetail(d.data); }).catch(()=>{}); }} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
                       <td style={{ padding:"14px 16px" }}><span style={{ fontWeight:600, color:"#111" }}>{s.vessel||"—"}</span></td>
-                      <td style={{ padding:"14px 16px", color:"#374151" }}>—</td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>{s.fleet||"—"}</td>
                       <td style={{ padding:"14px 16px", color:"#374151" }}>{s.inspector||"—"}</td>
-                      <td style={{ padding:"14px 16px", color:"#374151" }}>—</td>
+                      <td style={{ padding:"14px 16px", color:"#374151" }}>{s.template||"—"}</td>
                       <td style={{ padding:"14px 16px", color:"#374151", whiteSpace:"nowrap" }}>{s.started_at?new Date(s.started_at).toLocaleDateString("en-GB"):"—"}</td>
                       <td style={{ padding:"14px 16px" }}><span style={{ background:"#f3f4f6", color:"#374151", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:600 }}>{s.status}</span></td>
                     </tr>
@@ -4497,13 +4547,13 @@ export default function App() {
                 </div>
               </div>
               <div style={{ display:"flex", gap:10 }}>
-                <button style={{ padding:"9px 18px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>Force Process</button>
-                <button style={{ padding:"9px 18px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>Close Session</button>
-                <button style={{ padding:"9px 18px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:13, fontWeight:500, cursor:"pointer", fontFamily:"inherit", color:"#9ca3af", display:"flex", alignItems:"center", gap:6 }}>
+                <button onClick={()=>alert(`Session #${selectedSession.id} processing triggered.`)} style={{ padding:"9px 18px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>Force Process</button>
+                <button onClick={()=>{ if(confirm("Close this session?")){ alert("Session closed."); setSelectedSession(null);} }} style={{ padding:"9px 18px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#374151" }}>Close Session</button>
+                <button onClick={()=>alert("Report generation is automatic on inspection submit. Check the Reports page.")} style={{ padding:"9px 18px", background:"#fff", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:13, fontWeight:500, cursor:"pointer", fontFamily:"inherit", color:"#374151", display:"flex", alignItems:"center", gap:6 }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
                   Generate Report
                 </button>
-                <button style={{ padding:"9px 18px", background:P, border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#fff", display:"flex", alignItems:"center", gap:6 }}>
+                <button onClick={()=>{ setActivePage("reports"); setSelectedSession(null); }} style={{ padding:"9px 18px", background:P, border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", color:"#fff", display:"flex", alignItems:"center", gap:6 }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   View Report
                 </button>
@@ -4542,9 +4592,50 @@ export default function App() {
                 ))}
               </div>
             )}
-            {sessionTab==="Questions"&&<div style={{ background:"#fff", borderRadius:12, padding:"32px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", textAlign:"center", color:"#9ca3af" }}>No questions data available yet.</div>}
-            {sessionTab==="Evidence"&&<div style={{ background:"#fff", borderRadius:12, padding:"32px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", textAlign:"center", color:"#9ca3af" }}>No evidence uploaded yet.</div>}
-            {sessionTab==="AI Flags (pre-review)"&&<div style={{ background:"#fff", borderRadius:12, padding:"32px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", textAlign:"center", color:"#9ca3af" }}>No AI flags yet.</div>}
+            {sessionTab==="Questions"&&(
+              <div style={{ background:"#fff", borderRadius:12, padding:"24px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                {!sessionDetail||sessionDetail.questions.length===0
+                  ?<div style={{ textAlign:"center", color:"#9ca3af" }}>No questions data available yet.</div>
+                  :sessionDetail.questions.map((q,i)=>(
+                    <div key={i} style={{ padding:"14px 0", borderBottom:i<sessionDetail.questions.length-1?"1px solid #f3f4f6":"none" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontSize:12, fontWeight:700, color:"#1a2a5e", marginBottom:4 }}>Q {q.id}</div>
+                          <div style={{ fontSize:14, color:"#111", fontWeight:600 }}>{q.question}</div>
+                          {q.comment&&<div style={{ fontSize:13, color:"#6b7280", marginTop:4 }}>{q.comment}</div>}
+                        </div>
+                        <span style={{ background:q.answer==="yes"?"#dcfce7":q.answer==="no"?"#fee2e2":"#f3f4f6", color:q.answer==="yes"?"#166534":q.answer==="no"?"#991b1b":"#374151", borderRadius:6, padding:"4px 12px", fontSize:12, fontWeight:700, textTransform:"uppercase", whiteSpace:"nowrap" }}>{q.answer||"—"}</span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+            {sessionTab==="Evidence"&&(
+              <div style={{ background:"#fff", borderRadius:12, padding:"24px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                {!sessionDetail||sessionDetail.evidence.length===0
+                  ?<div style={{ textAlign:"center", color:"#9ca3af" }}>No evidence uploaded yet.</div>
+                  :<div style={{ display:"flex", flexWrap:"wrap", gap:16 }}>
+                    {sessionDetail.evidence.map((e,i)=>(
+                      <div key={i} style={{ width:180, border:"1px solid #e5e7eb", borderRadius:8, overflow:"hidden" }}>
+                        <img src={e.url} alt="evidence" style={{ width:"100%", height:140, objectFit:"cover", display:"block" }}/>
+                        <div style={{ padding:"8px 10px", fontSize:12, color:"#6b7280" }}>Q {e.question_id}</div>
+                      </div>
+                    ))}
+                  </div>}
+              </div>
+            )}
+            {sessionTab==="AI Flags (pre-review)"&&(
+              <div style={{ background:"#fff", borderRadius:12, padding:"24px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+                {!sessionDetail||sessionDetail.findings===0
+                  ?<div style={{ textAlign:"center", color:"#9ca3af" }}>No findings flagged.</div>
+                  :sessionDetail.questions.filter(q=>q.is_finding).map((q,i)=>(
+                    <div key={i} style={{ padding:"12px 0", borderBottom:"1px solid #f3f4f6", display:"flex", alignItems:"center", gap:10 }}>
+                      <span style={{ background:"#fee2e2", color:"#991b1b", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:700 }}>Finding</span>
+                      <span style={{ fontSize:14, color:"#111" }}>{q.question}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
           </div>
         </div>
       )}
