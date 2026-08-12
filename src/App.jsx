@@ -436,7 +436,7 @@ export default function App() {
       if(r.status===401){ localStorage.clear(); setScreen("signin"); throw new Error("session expired"); }
       return r.json();
     }).then(fd=>{
-      const fleetList = fd.success ? fd.data.map(f=>({...f, region:f.description, vessels:[]})) : [];
+      const fleetList = fd.success ? fd.data.map(f=>({...f, region:f.description, vessels:[], vessel_count:f.vessel_count||0})) : [];
       setFleets(fleetList);
       fetch(`${API}/api/admin/vessels`,{headers:hdr}).then(r=>r.json()).then(vd=>{
         if(vd.success) setVessels(vd.data.map(v=>({
@@ -449,10 +449,10 @@ export default function App() {
     // Question Bank
     fetch(`${API}/api/admin/questions`,{headers:hdr}).then(r=>r.json()).then(d=>{
       if(d.success) setQuestions(d.data.map(q=>({
-        ...q, text:q.question, subNumber:q.sub_number, subArea:q.sub_area,
-        inspectionGuide:q.guide_to_inspection, evidenceRequired:q.evidence_required,
+        ...q, text:q.question||"", subNumber:q.sub_number||"", subArea:q.sub_area||"",
+        inspectionGuide:q.guide_to_inspection||"", evidenceRequired:q.evidence_required,
       })));
-    }).catch(()=>{});
+    }).catch((e)=>{ console.log("questions load error", e); });
     // Templates
     fetch(`${API}/api/admin/templates`,{headers:hdr}).then(r=>r.json()).then(d=>{
       if(d.success) setTemplates(d.data.map(t=>({
@@ -1516,10 +1516,11 @@ export default function App() {
         const sevColor={low:"#6b7280",medium:"#374151",high:A,critical:"#ef4444"};
         const sevBg={low:"#f3f4f6",medium:"#f3f4f6",high:"#fff3e0",critical:"#fee2e2"};
         const filtered=questions.filter(q=>{
+          const qText=(q.text||q.question||"").toString();
           const matchCat=qbCategoryFilter==="All categories"||q.category===qbCategoryFilter;
-          const matchSev=qbSeverityFilter==="All severities"||q.severity===qbSeverityFilter.toLowerCase();
+          const matchSev=qbSeverityFilter==="All severities"||(q.severity||"").toLowerCase()===qbSeverityFilter.toLowerCase();
           const matchType=qbTypeFilter==="All types"||q.type===qbTypeFilter;
-          const matchSearch=!qbSearch||q.text.toLowerCase().includes(qbSearch.toLowerCase());
+          const matchSearch=!qbSearch||qText.toLowerCase().includes(qbSearch.toLowerCase());
           return matchCat&&matchSev&&matchType&&matchSearch;
         });
         const totalPages=Math.ceil(filtered.length/qbPerPage);
@@ -1555,9 +1556,9 @@ export default function App() {
                     <input type="file" accept=".csv,.xlsx,.xls" style={{display:"none"}} onChange={e=>{
                       const file=e.target.files[0]; if(!file)return;
                       window._bulkFile = file;
-                      const VALID_CATS=["deck","engine room","bridge"];
+                      const VALID_CATS=["deck","engine room","bridge","general information","navigation","safety","accommodation","cargo","hull","machinery","documentation","environmental","fire safety","life saving","pollution prevention"];
                       const VALID_SEVS=["low","medium","high","critical"];
-                      const VALID_TYPES=["binary","written","measurement","binary (yes/no)","written response"];
+                      const VALID_TYPES=["binary","written","measurement","binary (yes/no)","written response","text","multiple choice","numeric","yes/no"];
                       const processRows=(rawRows)=>{
                         const preview=[]; const errors=[];
                         rawRows.forEach((row,i)=>{
@@ -1567,14 +1568,15 @@ export default function App() {
                           const type=(row["type"]||row["Type"]||"binary").trim().toLowerCase();
                           const subArea=(row["sub_area"]||row["Sub-Area"]||row["subarea"]||"").trim();
                           const evidReq=(row["evidence_required"]||row["Evidence Required"]||"false").toString().toLowerCase()==="true";
-                          const guide=(row["inspection_guide"]||row["Inspection Guide"]||"").trim();
+                          const guide=(row["inspection_guide"]||row["Inspection Guide"]||row["guide_to_inspection"]||row["Guide"]||"").trim();
+                          const subNumber=(row["sub_number"]||row["Sub Number"]||row["sub_no"]||row["Sub No"]||"").trim();
                           const rowErrors=[];
                           if(!text) rowErrors.push("Question text is empty");
                           if(!VALID_CATS.includes(cat.toLowerCase())) rowErrors.push(`Invalid category "${cat}"`);
                           if(!VALID_SEVS.includes(sev)) rowErrors.push(`Invalid severity "${sev}"`);
                           if(!VALID_TYPES.includes(type)) rowErrors.push(`Invalid type "${type}"`);
                           if(rowErrors.length>0){ errors.push({row:i+2,errors:rowErrors,text:text||"(empty)"}); }
-                          else { preview.push({text,category:cat.charAt(0).toUpperCase()+cat.slice(1),subArea,severity:sev,type:type==="binary (yes/no)"?"binary":type==="written response"?"written":type,evidenceRequired:evidReq,inspectionGuide:guide}); }
+                          else { preview.push({text,subNumber,category:cat.charAt(0).toUpperCase()+cat.slice(1),subArea,severity:sev,type:type==="binary (yes/no)"?"binary":type==="written response"?"written":type,evidenceRequired:evidReq,inspectionGuide:guide}); }
                         });
                         setBulkPreviewRows(preview);
                         setBulkErrors(errors);
@@ -1631,9 +1633,9 @@ export default function App() {
                           <span style={{fontSize:13,fontWeight:700,color:"#dc2626"}}>{bulkErrors.length} rows with errors</span>
                         </div>
                       )}
-                      {questions.length>0&&bulkPreviewRows.filter(r=>questions.some(q=>q.text.toLowerCase()===r.text.toLowerCase())).length>0&&(
+                      {questions.length>0&&bulkPreviewRows.filter(r=>questions.some(q=>(q.text||"").toLowerCase()===(r.text||"").toLowerCase())).length>0&&(
                         <div style={{display:"flex",alignItems:"center",gap:8,background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 16px"}}>
-                          <span style={{fontSize:13,fontWeight:700,color:"#d97706"}}>⚠️ {bulkPreviewRows.filter(r=>questions.some(q=>q.text.toLowerCase()===r.text.toLowerCase())).length} duplicates will be skipped</span>
+                          <span style={{fontSize:13,fontWeight:700,color:"#d97706"}}>⚠️ {bulkPreviewRows.filter(r=>questions.some(q=>(q.text||"").toLowerCase()===(r.text||"").toLowerCase())).length} duplicates will be skipped</span>
                         </div>
                       )}
                     </div>
@@ -1645,10 +1647,11 @@ export default function App() {
                           <p style={{fontSize:13,fontWeight:700,color:"#374151",marginBottom:10}}>Valid Questions (first 5 preview)</p>
                           <div style={{border:"1px solid #e5e7eb",borderRadius:10,overflow:"hidden"}}>
                             <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                              <thead><tr style={{background:"#f9fafb",borderBottom:"1px solid #e5e7eb"}}>{["QUESTION","CATEGORY","SEVERITY","TYPE"].map(h=><th key={h} style={{textAlign:"left",padding:"10px 14px",color:"#6b7280",fontWeight:700,fontSize:11,letterSpacing:"0.05em"}}>{h}</th>)}</tr></thead>
+                              <thead><tr style={{background:"#f9fafb",borderBottom:"1px solid #e5e7eb"}}>{["SUB NO","QUESTION","CATEGORY","SEVERITY","TYPE"].map(h=><th key={h} style={{textAlign:"left",padding:"10px 14px",color:"#6b7280",fontWeight:700,fontSize:11,letterSpacing:"0.05em"}}>{h}</th>)}</tr></thead>
                               <tbody>
                                 {bulkPreviewRows.slice(0,5).map((r,i)=>(
                                   <tr key={i} style={{borderBottom:"1px solid #f3f4f6"}}>
+                                    <td style={{padding:"10px 14px",color:"#374151",fontWeight:500}}>{r.subNumber||"—"}</td>
                                     <td style={{padding:"10px 14px",color:"#111",maxWidth:280,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.text}</td>
                                     <td style={{padding:"10px 14px",color:"#374151"}}>{r.category}</td>
                                     <td style={{padding:"10px 14px"}}><span style={{background:r.severity==="critical"?"#fee2e2":r.severity==="high"?"#fff3e0":"#f3f4f6",color:r.severity==="critical"?"#ef4444":r.severity==="high"?A:"#374151",borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:600}}>{r.severity}</span></td>
@@ -1682,28 +1685,40 @@ export default function App() {
                       <div style={{display:"flex",gap:10}}>
                         {bulkPreviewRows.length>0&&(
                           <button onClick={async()=>{
-                            try{
-                              const formData = new FormData();
-                              const bulkFile = document.getElementById('bulk-file-input').files[0] || window._bulkFile;
-                              if(bulkFile){
+                            const token = localStorage.getItem('token');
+                            const bulkFile = window._bulkFile || (document.getElementById('bulk-file-input')?.files?.[0]);
+                            if(bulkFile && token){
+                              try{
+                                const formData = new FormData();
                                 formData.append('file', bulkFile);
-                                const token = localStorage.getItem('token');
                                 const r = await fetch(`${API}/api/admin/questions/bulk-upload`,{method:'POST',headers:{'Authorization':`Bearer ${token}`},body:formData});
                                 const d = await r.json();
-                                if(d.success){
+                                console.log('bulk upload response:', d);
+                                if(d && d.success){
+                                  const importedCount = parseInt((d.message||"").match(/\d+/)?.[0] || bulkPreviewRows.length);
                                   // Reload questions from backend
-                                  fetch(`${API}/api/admin/questions`,{headers:{"Authorization":`Bearer ${token}`}}).then(r=>r.json()).then(d=>{ if(d.success) setQuestions(d.data.map(q=>({...q,text:q.question,subNumber:q.sub_number,subArea:q.sub_area,inspectionGuide:q.guide_to_inspection,evidenceRequired:q.evidence_required}))); });
+                                  try{
+                                    const rq = await fetch(`${API}/api/admin/questions`,{headers:{"Authorization":`Bearer ${token}`}});
+                                    const dq = await rq.json();
+                                    if(dq && dq.success && Array.isArray(dq.data)){
+                                      setQuestions(dq.data.map(q=>({...q,text:q.question||"",subNumber:q.sub_number||"",subArea:q.sub_area||"",inspectionGuide:q.guide_to_inspection||"",evidenceRequired:q.evidence_required})));
+                                    }
+                                  }catch(reloadErr){ console.log('reload failed:', reloadErr); }
                                   setQbPage(1);
                                   setShowBulkPreview(false);
-                                  setBulkResult({inserted:d.data.imported,skipped:d.data.skipped,errors:d.data.errors||[]});
+                                  setBulkResult({inserted:importedCount,skipped:0,errors:[]});
                                   setShowBulkResult(true);
                                   return;
+                                } else {
+                                  console.log('upload returned non-success:', d);
                                 }
-                              }
-                            }catch(e){ console.log('Backend upload failed, using local'); }
+                              }catch(e){ console.log('Backend upload failed, using local:', e); }
+                            } else {
+                              console.log('No file or token:', {hasFile:!!bulkFile, hasToken:!!token});
+                            }
                             // Fallback to local
-                            const dupes=new Set(questions.map(q=>q.text.toLowerCase()));
-                            const toInsert=bulkPreviewRows.filter(r=>!dupes.has(r.text.toLowerCase()));
+                            const dupes=new Set(questions.map(q=>(q.text||"").toLowerCase()));
+                            const toInsert=bulkPreviewRows.filter(r=>!dupes.has((r.text||"").toLowerCase()));
                             const skipped=bulkPreviewRows.length-toInsert.length;
                             const newQs=toInsert.map(r=>({...r,id:Date.now()+Math.random(),evidence:r.evidenceRequired?"photo":"—",status:"Active"}));
                             setQuestions(prev=>[...prev,...newQs]);
@@ -2583,9 +2598,9 @@ export default function App() {
                   <h3 style={{ fontSize:15, fontWeight:700, color:"#111", marginBottom:14 }}>Question Bank</h3>
                   <input value={qbBuilderSearch} onChange={e=>setQbBuilderSearch(e.target.value)} placeholder="Search questions..." style={{ ...inputStyle, marginBottom:12 }}/>
                   <div style={{ maxHeight:480, overflowY:"auto" }}>
-                    {questions.filter(q=>!qbBuilderSearch||q.text.toLowerCase().includes(qbBuilderSearch.toLowerCase())).length===0
+                    {questions.filter(q=>!qbBuilderSearch||(q.text||"").toLowerCase().includes(qbBuilderSearch.toLowerCase())).length===0
                       ?<div style={{ fontSize:13, color:"#9ca3af", textAlign:"center", padding:"24px 0" }}>No questions in bank yet.</div>
-                      :questions.filter(q=>!qbBuilderSearch||q.text.toLowerCase().includes(qbBuilderSearch.toLowerCase())).map(q=>{ const added=tmplStructure.some(s=>s.id===q.id); return <div key={q.id} onClick={()=>{ if(!added)setTmplStructure(prev=>[...prev,q]); }} style={{ padding:"10px 12px", marginBottom:6, borderRadius:8, border:`1px solid ${added?"#e0e7ff":"#e5e7eb"}`, fontSize:13, color:"#374151", cursor:added?"default":"pointer", background:added?"#f8f9ff":"#fff" }}><div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}><span>{q.text}</span>{added?<span style={{ background:P, color:"#fff", borderRadius:4, padding:"1px 8px", fontSize:11, fontWeight:600, flexShrink:0 }}>Added</span>:<span style={{ color:"#9ca3af", fontSize:18 }}>+</span>}</div><div style={{ fontSize:11, color:"#9ca3af", marginTop:3 }}>{q.category}</div></div>; })
+                      :questions.filter(q=>!qbBuilderSearch||(q.text||"").toLowerCase().includes(qbBuilderSearch.toLowerCase())).map(q=>{ const added=tmplStructure.some(s=>s.id===q.id); return <div key={q.id} onClick={()=>{ if(!added)setTmplStructure(prev=>[...prev,q]); }} style={{ padding:"10px 12px", marginBottom:6, borderRadius:8, border:`1px solid ${added?"#e0e7ff":"#e5e7eb"}`, fontSize:13, color:"#374151", cursor:added?"default":"pointer", background:added?"#f8f9ff":"#fff" }}><div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}><span>{q.text}</span>{added?<span style={{ background:P, color:"#fff", borderRadius:4, padding:"1px 8px", fontSize:11, fontWeight:600, flexShrink:0 }}>Added</span>:<span style={{ color:"#9ca3af", fontSize:18 }}>+</span>}</div><div style={{ fontSize:11, color:"#9ca3af", marginTop:3 }}>{q.category}</div></div>; })
                     }
                   </div>
                 </div>
