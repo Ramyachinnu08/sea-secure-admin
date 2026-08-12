@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 
 const MENU = [
   { section: "OVERVIEW", items: [{ id: "dashboard", label: "Dashboard", icon: "⊞" }] },
@@ -23,6 +23,112 @@ const PARTICLES = Array.from({ length: 28 }, (_, i) => ({
   duration: Math.random() * 4 + 4,
   opacity: Math.random() * 0.5 + 0.15,
 }));
+
+
+function BG({ children, selectedFont, A }) {
+  return (
+    <div style={{
+      minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center", padding: 20,
+      fontFamily: selectedFont+",'Segoe UI',sans-serif", overflow: "hidden",
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=${selectedFont.replace(/ /g,"+")}:wght@400;500;600;700;800&display=swap');
+        @keyframes slowZoom { 0%{transform:scale(1.0) translateX(0px)} 50%{transform:scale(1.06) translateX(-12px)} 100%{transform:scale(1.0) translateX(0px)} }
+        @keyframes sunRay { 0%{opacity:0.0} 40%{opacity:1.0} 100%{opacity:0.0} }
+        @keyframes shimmerH { 0%{transform:translateX(-100%)} 100%{transform:translateX(200%)} }
+        @keyframes dustFloat { 0%{transform:translateY(0px) translateX(0px);opacity:0} 20%{opacity:1} 80%{opacity:0.6} 100%{transform:translateY(-60px) translateX(20px);opacity:0} }
+        @keyframes loginFadeIn { from{opacity:0;transform:translateY(22px) scale(0.98)} to{opacity:1;transform:translateY(0) scale(1)} }
+        .login-card-animate { animation: loginFadeIn 0.65s cubic-bezier(0.22,1,0.36,1) 0.1s both; }
+      `}</style>
+      <div style={{ position:"absolute", inset:0, backgroundImage:"url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1920&q=90')", backgroundSize:"cover", backgroundPosition:"center 55%", animation:"slowZoom 22s ease-in-out infinite", filter:"brightness(0.62) saturate(1.15) contrast(1.05)" }}/>
+      <div style={{ position:"absolute", inset:0, background:"linear-gradient(175deg,rgba(8,14,38,0.72) 0%,rgba(20,12,8,0.45) 35%,rgba(30,16,6,0.38) 55%,rgba(6,10,30,0.80) 100%)" }}/>
+      <div style={{ position:"absolute", inset:0, background:"linear-gradient(to top,rgba(4,8,24,0.92) 0%,transparent 55%)" }}/>
+      <div style={{ position:"absolute", inset:0, background:"linear-gradient(to bottom,rgba(4,8,24,0.60) 0%,transparent 40%)" }}/>
+      <div style={{ position:"absolute", top:"28%", left:"50%", transform:"translateX(-50%)", width:"900px", height:"420px", background:"radial-gradient(ellipse at center,rgba(255,160,40,0.28) 0%,rgba(255,100,20,0.12) 40%,transparent 75%)", pointerEvents:"none" }}/>
+      {[{angle:-38,delay:0,dur:5},{angle:-22,delay:0.8,dur:6},{angle:-8,delay:0.3,dur:4.5},{angle:6,delay:1.2,dur:5.5},{angle:20,delay:0.6,dur:6},{angle:34,delay:1.5,dur:5}].map((r,i)=>(
+        <div key={i} style={{ position:"absolute", top:"28%", left:"50%", width:"2px", height:"65vh", transformOrigin:"top center", transform:`rotate(${r.angle}deg)`, background:"linear-gradient(to bottom,rgba(255,190,80,0.22),transparent)", animation:`sunRay ${r.dur}s ease-in-out infinite`, animationDelay:`${r.delay}s`, pointerEvents:"none" }}/>
+      ))}
+      {PARTICLES.map(p=>(
+        <div key={p.id} style={{ position:"absolute", left:`${p.left}%`, top:`${40+p.top*0.45}%`, width:`${p.size*0.8}px`, height:`${p.size*0.8}px`, borderRadius:"50%", background:p.id%4===0?"rgba(255,200,100,0.85)":p.id%4===1?"rgba(255,255,200,0.70)":p.id%4===2?"rgba(255,160,60,0.75)":"rgba(200,220,255,0.60)", boxShadow:p.id%2===0?`0 0 ${p.size*4}px rgba(255,170,60,0.55)`:`0 0 ${p.size*3}px rgba(255,230,150,0.40)`, animation:`dustFloat ${p.duration+2}s ease-in-out infinite`, animationDelay:`${p.delay}s`, pointerEvents:"none" }}/>
+      ))}
+      <div style={{ position:"absolute", inset:0, background:"radial-gradient(ellipse 110% 100% at 50% 50%,transparent 42%,rgba(2,5,18,0.72) 100%)", pointerEvents:"none" }}/>
+      <div className="login-card-animate" style={{ position:"relative", zIndex:2, display:"flex", flexDirection:"column", alignItems:"center", width:"100%" }}>{children}</div>
+    </div>
+  );
+}
+
+function Logo({ title="Sea Secure Admin", sub="Fleet inspection management", A }) {
+  return (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:28 }}>
+      <div style={{ width:80, height:80, background:"rgba(255,255,255,0.07)", borderRadius:22, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:18, backdropFilter:"blur(10px)", border:"1px solid rgba(255,200,100,0.20)", boxShadow:"0 8px 40px rgba(255,120,20,0.25)" }}>
+        <div style={{ width:60, height:60, background:`linear-gradient(135deg,${A} 0%,${A} 100%)`, borderRadius:16, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 6px 20px ${A}8c`, padding:7 }}>
+          <svg viewBox="0 0 100 100" width="46" height="46" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="50" r="48" fill="none" stroke="#fff" strokeWidth="4"/>
+            <path d="M8 72 Q17 66 26 72 Q35 78 44 72 Q53 66 62 72 Q71 78 80 72 Q89 66 92 70" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"/>
+            <path d="M18 68 L22 58 L78 58 L82 68 Q50 76 18 68Z" fill="#fff"/>
+            <rect x="26" y="46" width="12" height="12" rx="1" fill="#fff"/>
+            <rect x="40" y="46" width="12" height="12" rx="1" fill="#fff"/>
+            <rect x="54" y="46" width="12" height="12" rx="1" fill="#fff"/>
+            <rect x="30" y="36" width="16" height="12" rx="2" fill="#fff"/>
+            <rect x="33" y="30" width="10" height="8" rx="1" fill="#fff"/>
+            <line x1="38" y1="18" x2="38" y2="30" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
+          </svg>
+        </div>
+      </div>
+      <div style={{ fontSize:24, fontWeight:800, color:"#fff", letterSpacing:"-0.02em", textShadow:"0 2px 16px rgba(0,0,0,0.5)" }}>{title}</div>
+      <div style={{ fontSize:13, color:"rgba(255,210,140,0.75)", marginTop:6, letterSpacing:"0.06em", fontWeight:500 }}>{sub}</div>
+    </div>
+  );
+}
+
+function Card({ children, maxWidth=480 }) {
+  return (
+    <div style={{ background:"rgba(255,255,255,0.96)", borderRadius:20, padding:"34px 38px", width:"100%", maxWidth, boxShadow:"0 32px 80px rgba(0,0,0,0.45)", backdropFilter:"blur(16px)", border:"1px solid rgba(255,255,255,0.18)" }}>{children}</div>
+  );
+}
+
+function ResetPasswordForm({ API, P, A, onDone, onBack }) {
+  const [pw, setPw] = React.useState("");
+  const [pw2, setPw2] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+
+  const submit = async () => {
+    setErr("");
+    if (!pw || !pw2) { setErr("Please fill in both fields"); return; }
+    if (pw !== pw2) { setErr("Passwords do not match"); return; }
+    if (pw.length < 6) { setErr("Password must be at least 6 characters"); return; }
+    const token = new URLSearchParams(window.location.search).get("token");
+    if (!token) { setErr("Invalid reset link"); return; }
+    setBusy(true);
+    try {
+      const r = await fetch(`${API}/auth/reset-password`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ token, new_password: pw }) });
+      const d = await r.json();
+      setBusy(false);
+      if (d.success) { alert("Password reset successfully! You can now sign in."); window.history.replaceState({},"",window.location.pathname); onDone(); }
+      else { setErr(d.message || "Reset failed"); }
+    } catch(e) { setBusy(false); setErr("Cannot connect to server"); }
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontSize:20, fontWeight:800, color:"#111", marginBottom:4 }}>Reset password</h2>
+      <p style={{ fontSize:14, color:"#6b7280", marginBottom:24 }}>Enter your new password below.</p>
+      <div style={{ marginBottom:16 }}>
+        <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>New password</label>
+        <input value={pw} onChange={e=>setPw(e.target.value)} type="password" placeholder="At least 6 characters" style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, color:"#111", fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
+      </div>
+      <div style={{ marginBottom:20 }}>
+        <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>Confirm new password</label>
+        <input value={pw2} onChange={e=>setPw2(e.target.value)} type="password" placeholder="Re-enter password" style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, color:"#111", fontFamily:"inherit", outline:"none", boxSizing:"border-box" }}/>
+      </div>
+      {err && <p style={{ color:"#ef4444", fontSize:13, marginBottom:14 }}>{err}</p>}
+      <button onClick={submit} disabled={busy} style={{ width:"100%", padding:"14px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:14, fontFamily:"inherit", opacity:busy?0.6:1 }}>{busy?"Updating…":"Update Password"}</button>
+      <div style={{ textAlign:"center" }}><span onClick={onBack} style={{ color:A, fontSize:14, fontWeight:600, cursor:"pointer" }}>Back to Sign In</span></div>
+    </div>
+  );
+}
 
 function ModalOverlay({ title, subtitle, children, onClose, maxWidth=480 }) {
   return (
@@ -100,6 +206,8 @@ export default function App() {
   const [totpUri, setTotpUri] = useState("");
   const [currentPw, setCurrentPw] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [resetPw, setResetPw] = useState("");
+  const [resetPw2, setResetPw2] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [passkeyName, setPasskeyName] = useState("");
   const [passkeys, setPasskeys] = useState([]);
@@ -464,36 +572,6 @@ export default function App() {
     }catch(e){ alert("Error connecting to server"); }
   };
 
-  const BG = ({ children }) => (
-    <div style={{
-      minHeight: "100vh", position: "relative", display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center", padding: 20,
-      fontFamily: selectedFont+",'Segoe UI',sans-serif", overflow: "hidden",
-    }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=${selectedFont.replace(/ /g,"+")}:wght@400;500;600;700;800&display=swap');
-        @keyframes slowZoom { 0%{transform:scale(1.0) translateX(0px)} 50%{transform:scale(1.06) translateX(-12px)} 100%{transform:scale(1.0) translateX(0px)} }
-        @keyframes sunRay { 0%{opacity:0.0} 40%{opacity:1.0} 100%{opacity:0.0} }
-        @keyframes shimmerH { 0%{transform:translateX(-100%)} 100%{transform:translateX(200%)} }
-        @keyframes dustFloat { 0%{transform:translateY(0px) translateX(0px);opacity:0} 20%{opacity:1} 80%{opacity:0.6} 100%{transform:translateY(-60px) translateX(20px);opacity:0} }
-        @keyframes loginFadeIn { from{opacity:0;transform:translateY(22px) scale(0.98)} to{opacity:1;transform:translateY(0) scale(1)} }
-        .login-card-animate { animation: loginFadeIn 0.65s cubic-bezier(0.22,1,0.36,1) 0.1s both; }
-      `}</style>
-      <div style={{ position:"absolute", inset:0, backgroundImage:"url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1920&q=90')", backgroundSize:"cover", backgroundPosition:"center 55%", animation:"slowZoom 22s ease-in-out infinite", filter:"brightness(0.62) saturate(1.15) contrast(1.05)" }}/>
-      <div style={{ position:"absolute", inset:0, background:"linear-gradient(175deg,rgba(8,14,38,0.72) 0%,rgba(20,12,8,0.45) 35%,rgba(30,16,6,0.38) 55%,rgba(6,10,30,0.80) 100%)" }}/>
-      <div style={{ position:"absolute", inset:0, background:"linear-gradient(to top,rgba(4,8,24,0.92) 0%,transparent 55%)" }}/>
-      <div style={{ position:"absolute", inset:0, background:"linear-gradient(to bottom,rgba(4,8,24,0.60) 0%,transparent 40%)" }}/>
-      <div style={{ position:"absolute", top:"28%", left:"50%", transform:"translateX(-50%)", width:"900px", height:"420px", background:"radial-gradient(ellipse at center,rgba(255,160,40,0.28) 0%,rgba(255,100,20,0.12) 40%,transparent 75%)", pointerEvents:"none" }}/>
-      {[{angle:-38,delay:0,dur:5},{angle:-22,delay:0.8,dur:6},{angle:-8,delay:0.3,dur:4.5},{angle:6,delay:1.2,dur:5.5},{angle:20,delay:0.6,dur:6},{angle:34,delay:1.5,dur:5}].map((r,i)=>(
-        <div key={i} style={{ position:"absolute", top:"28%", left:"50%", width:"2px", height:"65vh", transformOrigin:"top center", transform:`rotate(${r.angle}deg)`, background:"linear-gradient(to bottom,rgba(255,190,80,0.22),transparent)", animation:`sunRay ${r.dur}s ease-in-out infinite`, animationDelay:`${r.delay}s`, pointerEvents:"none" }}/>
-      ))}
-      {PARTICLES.map(p=>(
-        <div key={p.id} style={{ position:"absolute", left:`${p.left}%`, top:`${40+p.top*0.45}%`, width:`${p.size*0.8}px`, height:`${p.size*0.8}px`, borderRadius:"50%", background:p.id%4===0?"rgba(255,200,100,0.85)":p.id%4===1?"rgba(255,255,200,0.70)":p.id%4===2?"rgba(255,160,60,0.75)":"rgba(200,220,255,0.60)", boxShadow:p.id%2===0?`0 0 ${p.size*4}px rgba(255,170,60,0.55)`:`0 0 ${p.size*3}px rgba(255,230,150,0.40)`, animation:`dustFloat ${p.duration+2}s ease-in-out infinite`, animationDelay:`${p.delay}s`, pointerEvents:"none" }}/>
-      ))}
-      <div style={{ position:"absolute", inset:0, background:"radial-gradient(ellipse 110% 100% at 50% 50%,transparent 42%,rgba(2,5,18,0.72) 100%)", pointerEvents:"none" }}/>
-      <div className="login-card-animate" style={{ position:"relative", zIndex:2, display:"flex", flexDirection:"column", alignItems:"center", width:"100%" }}>{children}</div>
-    </div>
-  );
 
   const HowToUse = ({ show, onToggle, sections = [] }) => (
     <div style={{ background:"#fff", borderRadius:12, marginBottom:24, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", overflow:"hidden" }}>
@@ -519,31 +597,7 @@ export default function App() {
     </div>
   );
 
-  const Logo = ({ title="Sea Secure Admin", sub="Fleet inspection management" }) => (
-    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:28 }}>
-      <div style={{ width:80, height:80, background:"rgba(255,255,255,0.07)", borderRadius:22, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:18, backdropFilter:"blur(10px)", border:"1px solid rgba(255,200,100,0.20)", boxShadow:"0 8px 40px rgba(255,120,20,0.25)" }}>
-        <div style={{ width:60, height:60, background:`linear-gradient(135deg,${A} 0%,${A} 100%)`, borderRadius:16, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 6px 20px ${A}8c`, padding:7 }}>
-          <svg viewBox="0 0 100 100" width="46" height="46" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="50" cy="50" r="48" fill="none" stroke="#fff" strokeWidth="4"/>
-            <path d="M8 72 Q17 66 26 72 Q35 78 44 72 Q53 66 62 72 Q71 78 80 72 Q89 66 92 70" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"/>
-            <path d="M18 68 L22 58 L78 58 L82 68 Q50 76 18 68Z" fill="#fff"/>
-            <rect x="26" y="46" width="12" height="12" rx="1" fill="#fff"/>
-            <rect x="40" y="46" width="12" height="12" rx="1" fill="#fff"/>
-            <rect x="54" y="46" width="12" height="12" rx="1" fill="#fff"/>
-            <rect x="30" y="36" width="16" height="12" rx="2" fill="#fff"/>
-            <rect x="33" y="30" width="10" height="8" rx="1" fill="#fff"/>
-            <line x1="38" y1="18" x2="38" y2="30" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
-          </svg>
-        </div>
-      </div>
-      <div style={{ fontSize:24, fontWeight:800, color:"#fff", letterSpacing:"-0.02em", textShadow:"0 2px 16px rgba(0,0,0,0.5)" }}>{title}</div>
-      <div style={{ fontSize:13, color:"rgba(255,210,140,0.75)", marginTop:6, letterSpacing:"0.06em", fontWeight:500 }}>{sub}</div>
-    </div>
-  );
 
-  const Card = ({ children, maxWidth=480 }) => (
-    <div style={{ background:"rgba(255,255,255,0.96)", borderRadius:20, padding:"34px 38px", width:"100%", maxWidth, boxShadow:"0 32px 80px rgba(0,0,0,0.45)", backdropFilter:"blur(16px)", border:"1px solid rgba(255,255,255,0.18)" }}>{children}</div>
-  );
 
   const inputStyle = { width:"100%", padding:"10px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, color:"#111", fontFamily:"inherit", outline:"none", boxSizing:"border-box" };
   const selectStyle = { ...inputStyle, cursor:"pointer", appearance:"none", backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E\")", backgroundRepeat:"no-repeat", backgroundPosition:"right 14px center", paddingRight:36 };
@@ -551,8 +605,8 @@ export default function App() {
   const selectStyle2 = selectStyle;
 
   if (screen==="signin") return (
-    <BG>
-      <Logo/>
+    <BG selectedFont={selectedFont} A={A}>
+      <Logo A={A}/>
       <div style={{ background:"rgba(255,255,255,0.96)", borderRadius:20, padding:"34px 38px", width:"100%", maxWidth:480, boxShadow:"0 32px 80px rgba(0,0,0,0.45)", backdropFilter:"blur(16px)", border:"1px solid rgba(255,255,255,0.18)" }}>
         <h2 style={{ fontSize:22, fontWeight:800, color:"#111", marginBottom:4 }}>Sign In</h2>
         <p style={{ fontSize:14, color:"#6b7280", marginBottom:24 }}>Access the administration portal</p>
@@ -618,7 +672,7 @@ export default function App() {
   );
 
   if (screen==="forgot") return (
-    <BG><Logo title="Forgot Password" sub="Admin Portal"/>
+    <BG selectedFont={selectedFont} A={A}><Logo title="Forgot Password" sub="Admin Portal" A={A}/>
       <Card maxWidth={460}>
         <h2 style={{ fontSize:20, fontWeight:800, color:"#111", marginBottom:4 }}>Reset your password</h2>
         <p style={{ fontSize:14, color:"#6b7280", marginBottom:24 }}>Enter your email to receive a reset link.</p>
@@ -632,9 +686,12 @@ export default function App() {
         <button onClick={async()=>{
           if(!email) return;
           try{
-            const r=await fetch(`${API}/api/auth/forgot-password`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+            const r=await fetch(`${API}/auth/forgot-password`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
             const d=await r.json();
-            if(d.success){ setScreen("resetSent"); }
+            if(d.success){
+              if(d.reset_link){ alert("Email not configured. Reset link (for testing):\n\n"+d.reset_link); }
+              setScreen("resetSent");
+            }
           }catch(e){ alert("Cannot connect to server"); }
         }} style={{ width:"100%", padding:"14px", background:P, color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:14, fontFamily:"inherit" }}>Send Reset Link</button>
         <div style={{ textAlign:"center" }}><span onClick={()=>setScreen("signin")} style={{ color:A, fontSize:14, fontWeight:600, cursor:"pointer" }}>Back to Sign In</span></div>
@@ -643,11 +700,21 @@ export default function App() {
   );
 
   if (screen==="resetSent") return (
-    <BG><Logo title="Forgot Password" sub="Admin Portal"/>
+    <BG selectedFont={selectedFont} A={A}><Logo title="Forgot Password" sub="Admin Portal" A={A}/>
       <Card maxWidth={460}>
         <h2 style={{ fontSize:20, fontWeight:800, color:"#111", marginBottom:8 }}>Reset your password</h2>
         <p style={{ fontSize:14, color:"#6b7280", marginBottom:28 }}>If an account exists, check your email for the reset link.</p>
         <button onClick={()=>setScreen("signin")} style={{ width:"100%", padding:"14px", background:"#fff", color:"#111", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Back to Sign In</button>
+      </Card>
+    </BG>
+  );
+
+  if (screen==="newpassword") return (
+    <BG selectedFont={selectedFont} A={A}><Logo title="Set New Password" sub="Admin Portal" A={A}/>
+      <Card maxWidth={460}>
+        <ResetPasswordForm API={API} P={P} A={A}
+          onDone={()=>{ setScreen("signin"); }}
+          onBack={()=>{ window.history.replaceState({},"",window.location.pathname); setScreen("signin"); }} />
       </Card>
     </BG>
   );
