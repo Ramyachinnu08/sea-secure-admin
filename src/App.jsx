@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 const MENU = [
   { section: "OVERVIEW", items: [{ id: "dashboard", label: "Dashboard", icon: "⊞" }] },
   { section: "FLEET", items: [{ id: "vessels", label: "Vessels", icon: "🚢" }, { id: "fleets", label: "Fleets", icon: "🚢" }] },
-  { section: "INSPECTION CONFIG", items: [{ id: "questionbank", label: "Question Bank", icon: "❓" }, { id: "calibrary", label: "CA Library", icon: "📊" }, { id: "templates", label: "Templates", icon: "📄" }] },
+  { section: "INSPECTION CONFIG", items: [{ id: "questionbank", label: "Question Bank", icon: "❓" }, { id: "calibrary", label: "CA Library", icon: "📊" }, { id: "templates", label: "Templates", icon: "📄" }, { id: "knowledge", label: "AI Knowledge", icon: "🧠" }] },
   { section: "PROFILES", items: [{ id: "randomness", label: "Randomness", icon: "🔀" }, { id: "scoring", label: "Scoring", icon: "📈" }, { id: "aiprofiles", label: "AI Profiles", icon: "🤖" }, { id: "reportprofiles", label: "Report Profiles", icon: "📋" }] },
   { section: "OPERATIONS", items: [{ id: "assignments", label: "Assignments", icon: "📅" }, { id: "sessions", label: "Sessions", icon: "📝" }, { id: "reviewqueue", label: "Review Queue", icon: "👁" }] },
   { section: "OUTPUTS", items: [{ id: "reports", label: "Reports", icon: "📖" }, { id: "capatracker", label: "CAPA Tracker", icon: "✅" }, { id: "analytics", label: "Analytics", icon: "📉" }] },
@@ -58,23 +58,11 @@ function BG({ children, selectedFont, A }) {
   );
 }
 
-function Logo({ title="Sea Secure Admin", sub="Fleet inspection management", A }) {
+function Logo({ title="RightKnot Admin", sub="Fleet inspection management", A }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:28 }}>
-      <div style={{ width:80, height:80, background:"rgba(255,255,255,0.07)", borderRadius:22, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:18, backdropFilter:"blur(10px)", border:"1px solid rgba(255,200,100,0.20)", boxShadow:"0 8px 40px rgba(255,120,20,0.25)" }}>
-        <div style={{ width:60, height:60, background:`linear-gradient(135deg,${A} 0%,${A} 100%)`, borderRadius:16, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:`0 6px 20px ${A}8c`, padding:7 }}>
-          <svg viewBox="0 0 100 100" width="46" height="46" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="50" cy="50" r="48" fill="none" stroke="#fff" strokeWidth="4"/>
-            <path d="M8 72 Q17 66 26 72 Q35 78 44 72 Q53 66 62 72 Q71 78 80 72 Q89 66 92 70" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"/>
-            <path d="M18 68 L22 58 L78 58 L82 68 Q50 76 18 68Z" fill="#fff"/>
-            <rect x="26" y="46" width="12" height="12" rx="1" fill="#fff"/>
-            <rect x="40" y="46" width="12" height="12" rx="1" fill="#fff"/>
-            <rect x="54" y="46" width="12" height="12" rx="1" fill="#fff"/>
-            <rect x="30" y="36" width="16" height="12" rx="2" fill="#fff"/>
-            <rect x="33" y="30" width="10" height="8" rx="1" fill="#fff"/>
-            <line x1="38" y1="18" x2="38" y2="30" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
-          </svg>
-        </div>
+      <div style={{ width:80, height:80, borderRadius:22, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:18, overflow:"hidden", boxShadow:"0 8px 40px rgba(255,120,20,0.25)" }}>
+        <img src="https://i.ibb.co/8g7pqvvr/knot.png" alt="RightKnot" style={{ width:"100%", height:"100%", objectFit:"cover" }}/>
       </div>
       <div style={{ fontSize:24, fontWeight:800, color:"#fff", letterSpacing:"-0.02em", textShadow:"0 2px 16px rgba(0,0,0,0.5)" }}>{title}</div>
       <div style={{ fontSize:13, color:"rgba(255,210,140,0.75)", marginTop:6, letterSpacing:"0.06em", fontWeight:500 }}>{sub}</div>
@@ -169,6 +157,13 @@ export default function App() {
   const [pw, setPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [activePage, setActivePage] = useState("dashboard");
+  const [knowledgeDocs, setKnowledgeDocs] = useState([]);
+  const [kbTitle, setKbTitle] = useState("");
+  const [kbText, setKbText] = useState("");
+  const [kbBusy, setKbBusy] = useState(false);
+  const loadKnowledge = () => {
+    fetch(`${API}/api/rag/documents`,{headers:authHeader()}).then(r=>r.json()).then(d=>{ if(d.success) setKnowledgeDocs(d.documents||[]); }).catch(()=>{});
+  };
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const [vessels, setVessels] = useState([]);
@@ -211,6 +206,7 @@ export default function App() {
   const [confirmPw, setConfirmPw] = useState("");
   const [passkeyName, setPasskeyName] = useState("");
   const [passkeys, setPasskeys] = useState([]);
+  const [realBackupCodes, setRealBackupCodes] = useState([]);
   const [showCurrPw, setShowCurrPw] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
@@ -453,6 +449,10 @@ export default function App() {
         inspectionGuide:q.guide_to_inspection||"", evidenceRequired:q.evidence_required,
       })));
     }).catch((e)=>{ console.log("questions load error", e); });
+    // Passkeys
+    fetch(`${API}/auth/passkeys/list`,{headers:hdr}).then(r=>r.json()).then(d=>{ if(d.success&&d.passkeys) setPasskeys(d.passkeys); }).catch(()=>{});
+    // Knowledge documents (RAG)
+    fetch(`${API}/api/rag/documents`,{headers:hdr}).then(r=>r.json()).then(d=>{ if(d.success) setKnowledgeDocs(d.documents||[]); }).catch(()=>{});
     // Templates
     fetch(`${API}/api/admin/templates`,{headers:hdr}).then(r=>r.json()).then(d=>{
       if(d.success) setTemplates(d.data.map(t=>({
@@ -722,8 +722,8 @@ export default function App() {
   const Sidebar = () => (
     <div style={{ width:240, minHeight:"100vh", background:P, display:"flex", flexDirection:"column", position:"fixed", left:0, top:0, bottom:0, overflowY:"auto" }}>
       <div style={{ padding:"20px 16px 16px", display:"flex", flexDirection:"column", alignItems:"center", borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
-        <div style={{ width:logoHeight*18, height:logoHeight*18, background:A, borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:8, padding:5 }}>
-          <svg viewBox="0 0 100 100" width={logoHeight*15} height={logoHeight*15}><circle cx="50" cy="50" r="48" fill="none" stroke="#fff" strokeWidth="4"/><path d="M18 68 L22 58 L78 58 L82 68 Q50 76 18 68Z" fill="#fff"/><rect x="26" y="46" width="12" height="12" rx="1" fill="#fff"/><rect x="40" y="46" width="12" height="12" rx="1" fill="#fff"/><rect x="54" y="46" width="12" height="12" rx="1" fill="#fff"/><rect x="30" y="36" width="16" height="12" rx="2" fill="#fff"/><line x1="38" y1="18" x2="38" y2="30" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/></svg>
+        <div style={{ width:logoHeight*18, height:logoHeight*18, borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", marginBottom:8, overflow:"hidden" }}>
+          <img src="https://i.ibb.co/8g7pqvvr/knot.png" alt="RightKnot" style={{ width:"100%", height:"100%", objectFit:"contain" }}/>
         </div>
         <span style={{ fontSize:`${brandTextSize*0.6}rem`, fontWeight:700, color:"#94a3b8", letterSpacing:"0.1em" }}>ADMIN</span>
       </div>
@@ -891,7 +891,7 @@ export default function App() {
           <button onClick={()=>{
             if(verifyInput.length!==6){alert("Enter the 6-digit code");return;}
             fetch(`${API}/auth/totp/verify`,{method:"POST",headers:authHeader(),body:JSON.stringify({code:verifyInput,secret:totpSecret})}).then(r=>r.json()).then(d=>{
-              if(d.success){setTotpEnabled(true);setModal("backupCodes");setVerifyInput("");}
+              if(d.success){setTotpEnabled(true);setRealBackupCodes(d.backup_codes||[]);setModal("backupCodes");setVerifyInput("");}
               else{alert(d.message||"Invalid code");}
             }).catch(()=>alert("Error verifying code"));
           }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Verify & enable</button>
@@ -902,7 +902,7 @@ export default function App() {
       <ModalOverlay title="Backup codes" subtitle="Save these codes in a safe place." onClose={()=>setModal(null)} maxWidth={520}>
         <div style={{ background:"#f0fdf4", border:"1px solid #dcfce7", borderRadius:10, padding:"16px 20px", marginBottom:16 }}>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-            {BACKUP_CODES.map((code,i)=><div key={i} style={{ fontSize:14, fontFamily:"monospace", color:"#111" }}>{code}</div>)}
+            {(realBackupCodes.length?realBackupCodes:BACKUP_CODES).map((code,i)=><div key={i} style={{ fontSize:14, fontFamily:"monospace", color:"#111" }}>{code}</div>)}
           </div>
         </div>
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
@@ -925,12 +925,17 @@ export default function App() {
               const challenge=new Uint8Array(32); window.crypto.getRandomValues(challenge);
               const userId=new Uint8Array(16); window.crypto.getRandomValues(userId);
               const cred=await navigator.credentials.create({publicKey:{
-                challenge, rp:{name:"InspectShip"},
+                challenge, rp:{name:"RightKnot"},
                 user:{id:userId, name:"admin@inspectship.com", displayName:"Admin"},
                 pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
                 authenticatorSelection:{userVerification:"preferred"}, timeout:60000, attestation:"none"
               }});
-              if(cred){ setPasskeys(prev=>[...prev,{id:cred.id,name:passkeyName}]); setPasskeyName(""); setModal(null); alert("Passkey registered!"); }
+              if(cred){
+                setPasskeys(prev=>[...prev,{id:cred.id,name:passkeyName}]);
+                // save to backend
+                fetch(`${API}/auth/passkeys/save`,{method:"POST",headers:authHeader(),body:JSON.stringify({credential:{id:cred.id},name:passkeyName})}).then(r=>r.json()).catch(()=>{});
+                setPasskeyName(""); setModal(null); alert("Passkey registered!");
+              }
             }catch(e){ alert("Passkey registration cancelled or failed: "+e.message); }
           }} style={{ padding:"10px 22px", background:P, border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", color:"#fff" }}>Add key</button>
         </div>
@@ -2241,6 +2246,77 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* AI KNOWLEDGE (RAG) */}
+      {activePage==="knowledge"&&(
+        <div style={{ marginLeft:240, minHeight:"100vh", background:"#f0f2f5", fontFamily:selectedFont+",'Segoe UI',sans-serif" }} onClick={()=>{ setUserMenuOpen(false); }}>
+          <div style={{ padding:"32px 40px" }}>
+            <h1 style={{ fontSize:28, fontWeight:800, margin:"0 0 4px" }}>AI Knowledge Base</h1>
+            <p style={{ color:"#6b7280", margin:"0 0 24px" }}>Upload manuals, policies, or paste text. The AI will answer inspector questions using these documents.</p>
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:24 }}>
+              {/* Upload card */}
+              <div style={{ background:"#fff", borderRadius:16, border:"1px solid #e5e7eb", padding:24 }}>
+                <h3 style={{ fontSize:16, fontWeight:700, margin:"0 0 16px" }}>➕ Add Document</h3>
+                <label style={{ fontSize:13, fontWeight:600, color:"#374151" }}>Title</label>
+                <input value={kbTitle} onChange={e=>setKbTitle(e.target.value)} placeholder="e.g. Fire Safety Policy" style={{ width:"100%", padding:"10px 12px", border:"1px solid #d1d5db", borderRadius:8, marginTop:6, marginBottom:16, boxSizing:"border-box", fontFamily:"inherit", fontSize:14 }}/>
+
+                <label style={{ fontSize:13, fontWeight:600, color:"#374151" }}>Upload PDF/Text file</label>
+                <input type="file" id="kb-file" accept=".pdf,.txt,.md" style={{ width:"100%", marginTop:6, marginBottom:16, fontSize:13 }}/>
+
+                <div style={{ textAlign:"center", color:"#9ca3af", fontSize:13, margin:"4px 0 12px" }}>— OR paste text —</div>
+
+                <label style={{ fontSize:13, fontWeight:600, color:"#374151" }}>Paste text</label>
+                <textarea value={kbText} onChange={e=>setKbText(e.target.value)} rows={5} placeholder="Paste policy / manual text here..." style={{ width:"100%", padding:"10px 12px", border:"1px solid #d1d5db", borderRadius:8, marginTop:6, marginBottom:16, boxSizing:"border-box", fontFamily:"inherit", fontSize:14, resize:"vertical" }}/>
+
+                <button disabled={kbBusy} onClick={()=>{
+                  const fileInput = document.getElementById("kb-file");
+                  const file = fileInput && fileInput.files && fileInput.files[0];
+                  if(!file && !kbText.trim()){ alert("Add a file or paste text"); return; }
+                  setKbBusy(true);
+                  const fd = new FormData();
+                  fd.append("title", kbTitle || (file ? file.name : "Untitled"));
+                  if(file) fd.append("file", file);
+                  if(kbText.trim()) fd.append("text", kbText);
+                  fetch(`${API}/api/rag/upload`,{ method:"POST", headers:{ Authorization:authHeader().Authorization }, body:fd })
+                    .then(r=>r.json()).then(d=>{
+                      setKbBusy(false);
+                      if(d.success){ alert("Document added! "+(d.message||"")); setKbTitle(""); setKbText(""); if(fileInput) fileInput.value=""; loadKnowledge(); }
+                      else alert(d.message||"Upload failed");
+                    }).catch(()=>{ setKbBusy(false); alert("Upload failed"); });
+                }} style={{ width:"100%", padding:"12px", background:kbBusy?"#9ca3af":P, color:"#fff", border:"none", borderRadius:8, fontSize:15, fontWeight:700, cursor:kbBusy?"default":"pointer", fontFamily:"inherit" }}>{kbBusy?"Uploading...":"Upload to Knowledge Base"}</button>
+              </div>
+
+              {/* Documents list card */}
+              <div style={{ background:"#fff", borderRadius:16, border:"1px solid #e5e7eb", padding:24 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                  <h3 style={{ fontSize:16, fontWeight:700, margin:0 }}>📚 Documents ({knowledgeDocs.length})</h3>
+                  <button onClick={loadKnowledge} style={{ padding:"6px 12px", background:"#f3f4f6", border:"1px solid #e5e7eb", borderRadius:6, cursor:"pointer", fontSize:13, fontFamily:"inherit" }}>Refresh</button>
+                </div>
+                {knowledgeDocs.length===0
+                  ? <div style={{ textAlign:"center", color:"#9ca3af", padding:"40px 0", fontSize:14 }}>No documents yet.<br/>Upload one to teach the AI.</div>
+                  : knowledgeDocs.map(doc=>(
+                    <div key={doc.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 14px", border:"1px solid #f3f4f6", borderRadius:8, marginBottom:8 }}>
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:14 }}>📄 {doc.title}</div>
+                        <div style={{ fontSize:12, color:"#6b7280", marginTop:2 }}>{doc.chunk_count} chunks · {doc.char_count} chars</div>
+                      </div>
+                      <button onClick={()=>{
+                        if(!window.confirm("Delete this document?")) return;
+                        fetch(`${API}/api/rag/documents/${doc.id}`,{ method:"DELETE", headers:authHeader() }).then(r=>r.json()).then(d=>{ if(d.success) loadKnowledge(); });
+                      }} style={{ padding:"6px 10px", background:"#fef2f2", color:"#ef4444", border:"1px solid #fecaca", borderRadius:6, cursor:"pointer", fontSize:12, fontFamily:"inherit" }}>Delete</button>
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
+
+            <div style={{ marginTop:24, padding:16, background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:12, fontSize:13, color:"#1e40af" }}>
+              💡 <b>How it works:</b> When an inspector asks the AI a question, it first checks these documents. If the answer is here, it uses your document. If not, it uses general maritime knowledge.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* TEMPLATES LIST */}
       {activePage==="templates"&&!selectedTemplate&&!selectedDraft&&(
@@ -5055,7 +5131,7 @@ export default function App() {
                 <span style={{ fontSize:16, fontWeight:700, color:"#111" }}>Templates</span>
               </div>
               <div style={{ padding:"4px 24px 10px" }}>
-                <p style={{ fontSize:13, color:"#6b7280", margin:"10px 0 16px" }}>All outgoing emails use the Ship Inspector layout (logo, card, footer). Preview shows a sample; Edit lets you customize subject and body.</p>
+                <p style={{ fontSize:13, color:"#6b7280", margin:"10px 0 16px" }}>All outgoing emails use the RightKnot layout (logo, card, footer). Preview shows a sample; Edit lets you customize subject and body.</p>
                 <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 8px", borderBottom:"1px solid #f3f4f6" }}>
                   <span style={{ fontSize:12, fontWeight:700, color:"#6b7280", letterSpacing:"0.05em" }}>Template</span>
                   <span style={{ fontSize:12, fontWeight:700, color:"#6b7280", letterSpacing:"0.05em" }}>Actions</span>
@@ -5067,7 +5143,7 @@ export default function App() {
                       <span style={{ fontSize:14, color:"#111" }}>{name}</span>
                     </div>
                     <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-                      <button onClick={()=>alert(`Preview: ${name}\n\nThis email uses the Ship Inspector layout with logo, card body, and footer. Configure your email service (SendGrid/SMTP) to send these.`)} style={{ display:"flex", alignItems:"center", gap:5, background:"none", border:"none", cursor:"pointer", fontSize:13, color:"#374151", fontFamily:"inherit", fontWeight:500 }}>
+                      <button onClick={()=>alert(`Preview: ${name}\n\nThis email uses the RightKnot layout with logo, card body, and footer. Configure your email service (SendGrid/SMTP) to send these.`)} style={{ display:"flex", alignItems:"center", gap:5, background:"none", border:"none", cursor:"pointer", fontSize:13, color:"#374151", fontFamily:"inherit", fontWeight:500 }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         Preview
                       </button>
@@ -5383,7 +5459,7 @@ export default function App() {
                   <p style={{ fontSize:12, color:"#9ca3af", marginBottom:8 }}>Marketing Navbar</p>
                   <div style={{ background:P, borderRadius:8, padding:"14px 20px", display:"flex", alignItems:"center", gap:14, marginBottom:16 }}>
                     <div style={{ width:`${logoHeight*14}px`, height:`${logoHeight*14}px`, background:"rgba(255,255,255,0.15)", borderRadius:8, flexShrink:0 }}/>
-                    <span style={{ fontSize:`${brandTextSize}rem`, fontWeight:800, color:"#fff" }}>Ship Inspector</span>
+                    <span style={{ fontSize:`${brandTextSize}rem`, fontWeight:800, color:"#fff" }}>RightKnot</span>
                   </div>
                   <p style={{ fontSize:12, color:"#9ca3af", marginBottom:8 }}>Admin Sidebar</p>
                   <div style={{ display:"flex", justifyContent:"center", padding:"16px", background:"#f9fafb", borderRadius:8 }}>
