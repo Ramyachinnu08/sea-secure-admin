@@ -311,6 +311,8 @@ export default function App() {
   const [qbPerPageOpen, setQbPerPageOpen] = useState(false);
   const [showAddQuestion, setShowAddQuestion] = useState(false);
   const [qbMenuOpen, setQbMenuOpen] = useState(null);
+  const [qbSelected, setQbSelected] = useState(new Set());
+  const [qbDeleting, setQbDeleting] = useState(false);
   const [showEditQuestion, setShowEditQuestion] = useState(false);
   const [editQData, setEditQData] = useState(null);
   const [aiParamsQuestion, setAiParamsQuestion] = useState(null);
@@ -1842,12 +1844,43 @@ export default function App() {
                 </div>
               )}
 
+              {/* Bulk delete bar */}
+              {qbSelected.size>0&&(
+                <div style={{display:"flex",alignItems:"center",gap:14,background:"#fef2f2",border:"1px solid #fecaca",borderRadius:10,padding:"10px 16px",marginBottom:12}}>
+                  <span style={{fontSize:14,fontWeight:600,color:"#991b1b"}}>{qbSelected.size} selected</span>
+                  <button disabled={qbDeleting}
+                    onClick={async()=>{
+                      if(!window.confirm(`Delete ${qbSelected.size} question(s)? This cannot be undone.`)) return;
+                      setQbDeleting(true);
+                      try{
+                        const r=await fetch(`${API}/api/admin/questions/bulk-delete`,{method:"POST",headers:authHeader(),body:JSON.stringify({ids:[...qbSelected]})});
+                        if(!r.ok) throw new Error("bulk endpoint missing");
+                      }catch{
+                        // fallback: delete one by one if backend endpoint unavailable
+                        for(const id of qbSelected){ await fetch(`${API}/api/admin/questions/${id}`,{method:"DELETE",headers:authHeader()}).catch(()=>{}); }
+                      }
+                      setQuestions(prev=>prev.filter(x=>!qbSelected.has(x.id)));
+                      setQbSelected(new Set());
+                      setQbPage(1);
+                      setQbDeleting(false);
+                    }}
+                    style={{padding:"8px 18px",background:"#ef4444",color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:qbDeleting?"wait":"pointer",fontFamily:"inherit",opacity:qbDeleting?0.6:1}}>
+                    {qbDeleting?"Deleting…":"Delete Selected"}
+                  </button>
+                  <button onClick={()=>setQbSelected(new Set())} style={{padding:"8px 14px",background:"#fff",color:"#374151",border:"1px solid #e5e7eb",borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Clear</button>
+                </div>
+              )}
               {/* Table */}
               <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",overflow:"visible"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
                   <thead>
                     <tr style={{borderBottom:"2px solid #f3f4f6"}}>
-                      {[["SI NO","5%"],["SUB NO","7%"],["QUESTION","30%"],["CATEGORY","11%"],["SUB-AREA","10%"],["SEVERITY","9%"],["TYPE","10%"],["EVIDENCE","8%"],["","4%"]].map(([h,w])=>(
+                      <th style={{width:"4%",padding:"12px 14px",textAlign:"left"}}>
+                        <input type="checkbox" checked={filtered.length>0&&qbSelected.size===filtered.length}
+                          onChange={e=>{ if(e.target.checked){ setQbSelected(new Set(filtered.map(q=>q.id))); } else { setQbSelected(new Set()); } }}
+                          style={{width:16,height:16,cursor:"pointer",accentColor:P}} />
+                      </th>
+                      {[["SI NO","5%"],["SUB NO","7%"],["QUESTION","28%"],["CATEGORY","11%"],["SUB-AREA","10%"],["SEVERITY","9%"],["TYPE","9%"],["EVIDENCE","7%"],["","4%"]].map(([h,w])=>(
                         <th key={h} style={{textAlign:"left",padding:"12px 14px",color:"#6b7280",fontWeight:700,fontSize:11,letterSpacing:"0.05em",width:w}}>
                           {h}
                         </th>
@@ -1855,13 +1888,19 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {paginated.length===0?<tr><td colSpan={9}><div style={{textAlign:"center",padding:"56px 0"}}>
+                    {paginated.length===0?<tr><td colSpan={10}><div style={{textAlign:"center",padding:"56px 0"}}>
                       <div style={{fontSize:36,marginBottom:12}}>❓</div>
                       <div style={{fontSize:15,fontWeight:600,color:"#374151",marginBottom:6}}>No questions yet</div>
                       <div style={{fontSize:13,color:"#9ca3af",marginBottom:20}}>Click "Add Question" to build your question bank.</div>
                       <button onClick={()=>setShowAddQuestion(true)} style={{padding:"10px 24px",background:P,color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Add Question</button>
                     </div></td></tr>:paginated.map((q,idx)=>(
                       <tr key={q.id} style={{borderBottom:"1px solid #f3f4f6",cursor:"pointer"}} onClick={()=>{ setAiParamsQuestion(q); setAiP({ evidenceType:q.aiParams?.evidenceType||"Photo", ocrRequired:q.aiParams?.ocrRequired||false, objectPresenceList:q.aiParams?.objectPresenceList||"", conditionClassification:q.aiParams?.conditionClassification||"", acceptableRanges:q.aiParams?.acceptableRanges||"", autoAcceptAbove:q.aiParams?.autoAcceptAbove||"0.95", flagBelowReview:q.aiParams?.flagBelowReview||"0.70", routingRules:q.aiParams?.routingRules||[], suggestedCAs:q.aiParams?.suggestedCAs||[], newRuleCondition:"", newRuleReviewer:"", selectedCA:"" }); setAiHowToOpen(true); }} onMouseOver={e=>e.currentTarget.style.background="#fafafa"} onMouseOut={e=>e.currentTarget.style.background="#fff"}>
+                        {/* SELECT */}
+                        <td style={{padding:"13px 14px"}} onClick={e=>e.stopPropagation()}>
+                          <input type="checkbox" checked={qbSelected.has(q.id)}
+                            onChange={()=>{ setQbSelected(prev=>{ const n=new Set(prev); if(n.has(q.id)) n.delete(q.id); else n.add(q.id); return n; }); }}
+                            style={{width:16,height:16,cursor:"pointer",accentColor:P}} />
+                        </td>
                         {/* SI NO - auto */}
                         <td style={{padding:"13px 14px",color:"#9ca3af",fontWeight:600,fontSize:13}}>{(qbPage-1)*qbPerPage+idx+1}</td>
                         {/* SUB NUMBER - manual */}
