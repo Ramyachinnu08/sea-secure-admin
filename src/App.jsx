@@ -3247,8 +3247,7 @@ export default function App() {
                       <select value={randProfile.simVessel||""} onChange={e=>setRandProfile({...randProfile,simVessel:e.target.value,simResults:null})}
                         style={{ ...inputStyle, background:"#FDF8ED", appearance:"none", backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E\")", backgroundRepeat:"no-repeat", backgroundPosition:"right 14px center", cursor:"pointer" }}>
                         <option value="">Any vessel...</option>
-                        <option>MV Pacific Star</option>
-                        <option>MT Atlantic Dawn</option>
+                        {vessels.map(v=><option key={v.id} value={v.name}>{v.name}</option>)}
                       </select>
                     </div>
 
